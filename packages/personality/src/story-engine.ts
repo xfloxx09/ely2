@@ -507,7 +507,7 @@ export async function generateStoryJourney(
   });
 
   if (!providerChain.length) {
-    return fallback("No LLM API key configured (add Gemini key in Admin → Platform AI Keys)");
+    return fallback("No LLM API key configured (add a key in Admin → Platform AI Keys)");
   }
 
   const errors: string[] = [];
@@ -529,6 +529,28 @@ export async function generateStoryJourney(
   }
 
   return fallback(errors.join(" | ") || "LLM story generation failed");
+}
+
+/** Detect which LLM provider(s) hit quota / 429 from a fallback reason string. */
+export function parseLlmQuotaFailure(
+  reason?: string,
+  providerResolved?: "gemini" | "openai" | null
+): { providers: ("openai" | "gemini")[] } | null {
+  if (!reason) return null;
+  const lower = reason.toLowerCase();
+  if (!lower.includes("429") && !lower.includes("quota") && !lower.includes("rate limit")) {
+    return null;
+  }
+
+  const providers: ("openai" | "gemini")[] = [];
+  if (/openai\s*:/i.test(reason)) providers.push("openai");
+  if (/gemini\s*:/i.test(reason) || lower.includes("gemini api")) providers.push("gemini");
+
+  if (providers.length === 0 && providerResolved) {
+    providers.push(providerResolved);
+  }
+
+  return providers.length ? { providers: [...new Set(providers)] } : null;
 }
 
 export function partialScoresFromResponses(

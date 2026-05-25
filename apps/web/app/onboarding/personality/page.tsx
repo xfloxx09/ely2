@@ -9,6 +9,7 @@ import { PencilScene } from "@/components/onboarding/PencilScene";
 import { AvatarForge } from "@/components/onboarding/AvatarForge";
 import { StoryReveal } from "@/components/onboarding/StoryReveal";
 import { ChevronLeft, BookOpen, Feather } from "lucide-react";
+import { parseLlmQuotaFailure } from "@ely/personality";
 
 type StoryChoice = { label: string; value: number };
 
@@ -56,10 +57,73 @@ function choiceLabelForBeat(beat: StoryBeat, answerValue?: number) {
   return beat.choices.find((c) => c.value === answerValue)?.label;
 }
 
-function isQuotaExceeded(reason?: string): boolean {
-  if (!reason) return false;
-  const lower = reason.toLowerCase();
-  return lower.includes("429") || lower.includes("quota") || lower.includes("rate limit");
+function QuotaNotice({ debug }: { debug?: StoryJourney["_debug"] }) {
+  const quota = parseLlmQuotaFailure(debug?.storyFailureReason, debug?.providerResolved ?? null);
+  if (!quota) return null;
+
+  const usesOpenai = quota.providers.includes("openai");
+  const usesGemini = quota.providers.includes("gemini");
+
+  if (usesOpenai && usesGemini) {
+    return (
+      <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
+        Both OpenAI and Gemini returned quota errors (429). The built-in story still works — AI personalization is off
+        until billing or quota is restored. Check{" "}
+        <a
+          href="https://platform.openai.com/account/billing"
+          target="_blank"
+          rel="noreferrer"
+          className="underline text-orange-200"
+        >
+          OpenAI Billing
+        </a>{" "}
+        and{" "}
+        <a
+          href="https://aistudio.google.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline text-orange-200"
+        >
+          Google AI Studio
+        </a>
+        .
+      </p>
+    );
+  }
+
+  if (usesOpenai) {
+    return (
+      <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
+        Your OpenAI API quota is used up (error 429). The built-in story still works — only AI personalization is off
+        until you add billing or credits at{" "}
+        <a
+          href="https://platform.openai.com/account/billing"
+          target="_blank"
+          rel="noreferrer"
+          className="underline text-orange-200"
+        >
+          OpenAI Billing
+        </a>
+        . (Provider configured: OpenAI)
+      </p>
+    );
+  }
+
+  return (
+    <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
+      Your Gemini API quota is used up (error 429). The built-in story still works — only AI personalization is off
+      until quota resets or you enable billing at{" "}
+      <a
+        href="https://aistudio.google.com/"
+        target="_blank"
+        rel="noreferrer"
+        className="underline text-orange-200"
+      >
+        Google AI Studio
+      </a>
+      .
+    </p>
+  );
 }
 
 export default function PersonalityOnboarding() {
@@ -298,29 +362,15 @@ export default function PersonalityOnboarding() {
             {story.prologue}
           </motion.p>
 
-          {isQuotaExceeded(story._debug?.storyFailureReason) && (
-            <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
-              Your Gemini API quota is used up (error 429). The built-in story still works — only AI personalization
-              is off until quota resets or you enable billing at{" "}
-              <a
-                href="https://aistudio.google.com/"
-                target="_blank"
-                rel="noreferrer"
-                className="underline text-orange-200"
-              >
-                Google AI Studio
-              </a>
-              .
-            </p>
-          )}
+          <QuotaNotice debug={story._debug} />
 
           {story._debug && (
             <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-amber-100/85">
               <span className="font-semibold text-amber-200">Debug</span>
               {" · "}
               Story: {story._debug.storySource} ({story._debug.storyModel})
-              {story._debug.providerResolved && story._debug.providerResolved !== story._debug.storySource
-                ? ` · tried: ${story._debug.providerResolved}`
+              {story._debug.providerResolved
+                ? ` · configured: ${story._debug.providerResolved}`
                 : ""}
               {" · "}
               Sketch configured: {story._debug.sketchConfigured?.sketchSource} (
@@ -392,12 +442,13 @@ export default function PersonalityOnboarding() {
 
       <div className="relative mx-auto max-w-5xl">
         <header className="mb-6">
+          <QuotaNotice debug={storyDebug} />
           {(storyDebug || sketchDebug) && (
             <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-amber-100/90 sm:text-[11px]">
               <span className="font-semibold text-amber-200">Debug</span>
               {" · "}
               Story: {storyDebug?.storySource ?? "?"} ({storyDebug?.storyModel ?? "unknown"})
-              {storyDebug?.providerResolved ? ` · provider: ${storyDebug.providerResolved}` : ""}
+              {storyDebug?.providerResolved ? ` · configured: ${storyDebug.providerResolved}` : ""}
               {" · "}
               Sketch: {sketchDebug?.sketchSource ?? storyDebug?.sketchConfigured?.sketchSource ?? "?"}
               ({sketchDebug?.sketchModel ?? storyDebug?.sketchConfigured?.sketchModel ?? "pending"})
