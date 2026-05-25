@@ -56,6 +56,12 @@ function choiceLabelForBeat(beat: StoryBeat, answerValue?: number) {
   return beat.choices.find((c) => c.value === answerValue)?.label;
 }
 
+function isQuotaExceeded(reason?: string): boolean {
+  if (!reason) return false;
+  const lower = reason.toLowerCase();
+  return lower.includes("429") || lower.includes("quota") || lower.includes("rate limit");
+}
+
 export default function PersonalityOnboarding() {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("loading");
@@ -291,6 +297,22 @@ export default function PersonalityOnboarding() {
           >
             {story.prologue}
           </motion.p>
+
+          {isQuotaExceeded(story._debug?.storyFailureReason) && (
+            <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
+              Your Gemini API quota is used up (error 429). The built-in story still works — only AI personalization
+              is off until quota resets or you enable billing at{" "}
+              <a
+                href="https://aistudio.google.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline text-orange-200"
+              >
+                Google AI Studio
+              </a>
+              .
+            </p>
+          )}
 
           {story._debug && (
             <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-amber-100/85">
