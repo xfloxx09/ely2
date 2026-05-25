@@ -20,11 +20,20 @@ export type StoryBeat = {
   scenePrompt: string;
 };
 
+export type StoryWorldContext = {
+  framing: string;
+  timeline: string;
+  place: string;
+  yourRole: string;
+  mood: string;
+};
+
 export type StoryJourney = {
   title: string;
   prologue: string;
   heroName: string;
   setting: string;
+  worldContext: StoryWorldContext;
   beats: StoryBeat[];
   _debug?: StoryGenerationDebug;
 };
@@ -257,6 +266,40 @@ export function contextualStoryChoices(
   return pack(set[v]!);
 }
 
+function normalizeWorldContext(
+  raw: Partial<StoryWorldContext> | undefined,
+  hero: string,
+  setting: string
+): StoryWorldContext {
+  return {
+    framing: raw?.framing?.trim() || "A fictional fable — symbolic and immersive, not literal history",
+    timeline: raw?.timeline?.trim() || "One continuous journey over a few days in the same era",
+    place: raw?.place?.trim() || setting,
+    yourRole:
+      raw?.yourRole?.trim() ||
+      `You are ${hero}, the protagonist. Read each moment as if you are living it and choose what you would do.`,
+    mood: raw?.mood?.trim() || "Reflective, wonder-filled, grounded",
+  };
+}
+
+function parseWorldContext(parsed: Record<string, unknown>, hero: string, setting: string): StoryWorldContext {
+  const nested = parsed.worldContext as Partial<StoryWorldContext> | undefined;
+  if (nested && typeof nested === "object") {
+    return normalizeWorldContext(nested, hero, setting);
+  }
+  return normalizeWorldContext(
+    {
+      framing: typeof parsed.framing === "string" ? parsed.framing : undefined,
+      timeline: typeof parsed.timeline === "string" ? parsed.timeline : undefined,
+      place: typeof parsed.place === "string" ? parsed.place : undefined,
+      yourRole: typeof parsed.yourRole === "string" ? parsed.yourRole : undefined,
+      mood: typeof parsed.mood === "string" ? parsed.mood : undefined,
+    },
+    hero,
+    setting
+  );
+}
+
 function scenePromptFromArc(setting: string, chapter: number, sceneDetail: string): string {
   return `${setting}, ${sceneDetail}, chapter ${chapter}, continuous story journey, pencil sketch, graphite on paper, no text`;
 }
@@ -289,17 +332,26 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
     prologue: `${hero} steps into ${setting} with a blank map that only fills when their story is told truthfully. Over thirty moments, one journey unfolds — from the first lantern to the mirror pool where a companion takes shape. This is not a test. It is the tale of how ${hero} becomes whole.`,
     heroName: hero,
     setting,
+    worldContext: normalizeWorldContext(undefined, hero, setting),
     beats,
   };
 }
 
-const STORY_BATCH_SYSTEM_PROMPT = `You continue ONE continuous story for personality discovery. Return compact JSON only.
-Batch 1: title, prologue (2 sentences max), heroName, setting, beats (exactly N items).
+const STORY_BATCH_SYSTEM_PROMPT = `You write ONE continuous, linear story for personality discovery. Return compact JSON only.
+Batch 1: title, prologue (2 sentences max), heroName, setting, worldContext, beats (exactly N items).
 Later batches: beats array only (exactly N items).
 
-Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE short sentence), question (one line), choices (5 with label+value), scenePrompt (brief, no text in image).
-Choice values must be 5,4,3,2,1 once each. Keep labels under 12 words.
-Never mention Big Five or psychology. Output valid complete JSON.`;
+worldContext (batch 1 only): {
+  "framing": "Fictional fable | Dream allegory | Historical fiction | etc. — state clearly if this is real, invented, or symbolic",
+  "timeline": "When this happens — be specific (e.g. three autumn days, one moonlit night)",
+  "place": "Where the user is situated — geography, era, atmosphere",
+  "yourRole": "1-2 sentences: who the player is and how to inhabit this story",
+  "mood": "Overall emotional tone"
+}
+
+Rules: Same hero, same world bible, cause-and-effect between beats. No random genre or timeline jumps.
+Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence advancing the SAME plot), question (one line), choices (5 label+value), scenePrompt (brief).
+Choice values 5,4,3,2,1 once each. Labels under 12 words. Never mention Big Five or psychology.`;
 
 const STORY_BATCH_SIZE = 5;
 const STORY_BATCH_COUNT = 6;
@@ -495,6 +547,7 @@ type StoryBatchMeta = {
   prologue: string;
   heroName: string;
   setting: string;
+  worldContext: StoryWorldContext;
 };
 
 async function callStoryLlm(
@@ -587,13 +640,15 @@ Map these personality moments in order (same bfiId):
 ${JSON.stringify(bfiSlice)}`;
   }
 
-  return `Continue the SAME story you already started for "${meta?.heroName || hero}" in "${meta?.setting || setting}".
-Recent story: ${storySoFar.slice(-500) || "The journey has begun."}
+  return `Continue the SAME story you already started for "${meta?.heroName || hero}".
+DO NOT change the world bible. Stay in the same framing, timeline, and place:
+${JSON.stringify(meta?.worldContext)}
 
-Return JSON ONLY in this exact shape:
-{"beats":[{"id":${start + 1},"bfiId":...,"trait":"...","chapter":...,"chapterTitle":"...","narrative":"...","question":"...","choices":[{"label":"...","value":5},...],"scenePrompt":"..."}, ... ]}
+Title: ${meta?.title || "Untitled"}
+Recent plot: ${storySoFar.slice(-500) || "The journey has begun."}
 
-Exactly ${STORY_BATCH_SIZE} beats with ids ${start + 1} through ${end}. Do NOT include title or prologue again.
+Return JSON ONLY: {"beats":[...]}
+Exactly ${STORY_BATCH_SIZE} beats with ids ${start + 1} through ${end}. Each beat must follow logically from the previous.
 
 Plot spine:
 ${JSON.stringify(arcHints)}
@@ -684,6 +739,7 @@ async function generateStoryInBatches(
         prologue: parsed.prologue,
         heroName: parsed.heroName || hero,
         setting: parsed.setting || setting,
+        worldContext: parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || setting),
       };
     }
 
@@ -725,6 +781,7 @@ async function generateStoryInBatches(
       prologue: meta.prologue,
       heroName: meta.heroName,
       setting: meta.setting,
+      worldContext: meta.worldContext,
       beats: allBeats,
     }),
     warnings,

@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/utils";
 import { PencilScene } from "@/components/onboarding/PencilScene";
 import { AvatarForge } from "@/components/onboarding/AvatarForge";
 import { StoryReveal } from "@/components/onboarding/StoryReveal";
+import { StoryWorldPanel } from "@/components/onboarding/StoryWorldPanel";
 import { ChevronLeft, BookOpen, Feather } from "lucide-react";
 import { parseLlmQuotaFailure } from "@ely/personality";
 
@@ -25,11 +26,20 @@ type StoryBeat = {
   scenePrompt: string;
 };
 
+type StoryWorldContext = {
+  framing: string;
+  timeline: string;
+  place: string;
+  yourRole: string;
+  mood: string;
+};
+
 type StoryJourney = {
   title: string;
   prologue: string;
   heroName: string;
   setting: string;
+  worldContext: StoryWorldContext;
   beats: StoryBeat[];
   _debug?: {
     storySource?: "gemini" | "openai" | "fallback";
@@ -367,7 +377,12 @@ export default function PersonalityOnboarding() {
           </div>
 
           <h1 className="font-serif text-3xl leading-tight text-white sm:text-4xl">{story.title}</h1>
-          <p className="mt-2 text-sm text-ely-muted">{story.setting}</p>
+
+          {story.worldContext && (
+            <div className="mt-6">
+              <StoryWorldPanel title={story.title} worldContext={story.worldContext} compact />
+            </div>
+          )}
 
           <motion.p
             initial={{ opacity: 0 }}
@@ -462,7 +477,7 @@ export default function PersonalityOnboarding() {
     <div className="relative min-h-screen px-4 py-6 safe-top safe-bottom sm:py-8">
       <div className="pointer-events-none absolute inset-0 gradient-orb opacity-40" />
 
-      <div className="relative mx-auto max-w-5xl">
+      <div className="relative mx-auto max-w-6xl">
         <header className="mb-6">
           <QuotaNotice debug={storyDebug} />
           {(storyDebug || sketchDebug) && (
@@ -511,8 +526,16 @@ export default function PersonalityOnboarding() {
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_220px] lg:gap-8">
-          <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[minmax(220px,260px)_1fr_minmax(180px,220px)] lg:gap-8 lg:items-start">
+          {story.worldContext && (
+            <StoryWorldPanel
+              title={story.title}
+              worldContext={story.worldContext}
+              className="lg:sticky lg:top-8"
+            />
+          )}
+
+          <div className="space-y-6 min-w-0">
             <PencilScene
               imageUrl={viewedScene}
               loading={sceneLoading && viewSceneIndex === beatIndex}
