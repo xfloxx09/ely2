@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, users, communicationProfiles, userApiKeys, elyCredits } from "@ely/db";
-import { getNeutralProfile, getGeminiModel } from "@ely/personality";
+import { getNeutralProfile, getGeminiModel, inferAvatarEmotion } from "@ely/personality";
 import {
   buildSystemPrompt,
   completeElyCore,
@@ -131,5 +131,10 @@ export async function handleChatMessage(userId: string, content: string) {
     // best-effort
   }
 
-  return { content: fullResponse, model: modelUsed, conversationId: conv.id };
+  return {
+    content: fullResponse,
+    model: modelUsed,
+    conversationId: conv.id,
+    emotion: inferAvatarEmotion(fullResponse, "idle"),
+  };
 }

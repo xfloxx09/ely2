@@ -20,3 +20,45 @@ export async function ensurePlatformSettingsTable(): Promise<void> {
 
   platformSettingsEnsured = true;
 }
+
+let socialTablesEnsured = false;
+
+/** Creates social chat tables if missing. */
+export async function ensureSocialTables(): Promise<void> {
+  if (socialTablesEnsured) return;
+
+  const db = getDb();
+  await db.execute(sql`
+    DO $$ BEGIN
+      CREATE TYPE "social_conversation_type" AS ENUM ('DIRECT', 'AI_PERSONA');
+    EXCEPTION WHEN duplicate_object THEN null;
+    END $$;
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "social_conversations" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "type" "social_conversation_type" NOT NULL,
+      "created_by_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "participant_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+      "title" text DEFAULT 'Conversation' NOT NULL,
+      "metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
+      "created_at" timestamp DEFAULT now() NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "social_messages" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "conversation_id" uuid NOT NULL REFERENCES "social_conversations"("id") ON DELETE cascade,
+      "sender_id" uuid REFERENCES "users"("id") ON DELETE set null,
+      "role" "message_role" NOT NULL,
+      "content" text NOT NULL,
+      "metadata" jsonb DEFAULT '{}'::jsonb,
+      "created_at" timestamp DEFAULT now() NOT NULL
+    )
+  `);
+
+  socialTablesEnsured = true;
+}

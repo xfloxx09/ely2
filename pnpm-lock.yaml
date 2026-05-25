@@ -78,6 +78,9 @@ importers:
       '@ely/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ely/personality':
+        specifier: workspace:*
+        version: link:../../packages/personality
       '@ely/server':
         specifier: workspace:*
         version: link:../../packages/server

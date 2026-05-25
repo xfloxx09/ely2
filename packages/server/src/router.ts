@@ -43,6 +43,17 @@ import {
   getPlatformConfig,
   toLlmKeySource,
 } from "./platform-config.js";
+import {
+  getCommunityUsers,
+  getCommunityLeaderboard,
+  startDirectMessage,
+  listMySocialConversations,
+  getSocialConversation,
+  sendDirectMessage,
+  startAiPersonaBattle,
+  getUserPublicCard,
+  AI_BATTLE_TOPICS,
+} from "./social-service.js";
 
 type ApiRequest = {
   method: string;
@@ -212,6 +223,60 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       const { content } = body as { content: string };
       const result = await handleChatMessage(userId!, content);
       return { status: 200, body: result };
+    }
+
+    if (method === "GET" && path === "/community/users") {
+      return { status: 200, body: { users: await getCommunityUsers(userId!) } };
+    }
+
+    if (method === "GET" && path === "/community/leaderboard") {
+      return { status: 200, body: await getCommunityLeaderboard(userId!) };
+    }
+
+    if (method === "GET" && path === "/community/topics") {
+      return { status: 200, body: { topics: AI_BATTLE_TOPICS } };
+    }
+
+    if (method === "GET" && path.startsWith("/community/user/")) {
+      const targetId = path.replace("/community/user/", "");
+      return { status: 200, body: await getUserPublicCard(targetId, userId!) };
+    }
+
+    if (method === "GET" && path === "/community/conversations") {
+      return { status: 200, body: { conversations: await listMySocialConversations(userId!) } };
+    }
+
+    if (method === "POST" && path === "/community/dm") {
+      const { recipientId } = body as { recipientId: string };
+      const result = await startDirectMessage(userId!, recipientId);
+      return { status: 200, body: result };
+    }
+
+    if (method === "POST" && path === "/community/ai-battle") {
+      const { targetUserId, topic, exchanges } = body as {
+        targetUserId: string;
+        topic: string;
+        exchanges: number;
+      };
+      const result = await startAiPersonaBattle({
+        initiatorId: userId!,
+        targetUserId,
+        topic,
+        exchanges: exchanges ?? 4,
+      });
+      return { status: 200, body: result };
+    }
+
+    if (method === "GET" && path.startsWith("/community/conversation/")) {
+      const convId = path.replace("/community/conversation/", "");
+      return { status: 200, body: await getSocialConversation(convId, userId!) };
+    }
+
+    if (method === "POST" && path.startsWith("/community/conversation/") && path.endsWith("/message")) {
+      const convId = path.replace("/community/conversation/", "").replace("/message", "");
+      const { content } = body as { content: string };
+      const message = await sendDirectMessage(convId, userId!, content);
+      return { status: 200, body: { message } };
     }
 
     if (method === "GET" && path === "/gamification/stats") {

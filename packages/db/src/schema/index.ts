@@ -72,6 +72,11 @@ export const nexusProviderEnum = pgEnum("nexus_provider", [
   "COHERE",
 ]);
 
+export const socialConversationTypeEnum = pgEnum("social_conversation_type", [
+  "DIRECT",
+  "AI_PERSONA",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
@@ -611,6 +616,39 @@ export const platformSettings = pgTable("platform_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedById: uuid("updated_by_id").references(() => users.id),
 });
+
+export const socialConversations = pgTable(
+  "social_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: socialConversationTypeEnum("type").notNull(),
+    createdById: uuid("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    participantIds: jsonb("participant_ids").notNull().default([]),
+    title: text("title").notNull().default("Conversation"),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("social_conversations_created_by_idx").on(t.createdById)]
+);
+
+export const socialMessages = pgTable(
+  "social_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => socialConversations.id, { onDelete: "cascade" }),
+    senderId: uuid("sender_id").references(() => users.id, { onDelete: "set null" }),
+    role: messageRoleEnum("role").notNull(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("social_messages_conversation_idx").on(t.conversationId)]
+);
 
 export const spendingEntries = pgTable("spending_entries", {
   id: uuid("id").primaryKey().defaultRandom(),

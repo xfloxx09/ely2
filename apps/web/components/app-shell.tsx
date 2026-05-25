@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { MessageCircle, LayoutGrid, User, Users, Trophy, Settings } from "lucide-react";
+import { MessageCircle, LayoutGrid, User, Users, Trophy, Settings, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/chat", icon: MessageCircle, label: "Chat" },
+  { href: "/community", icon: Globe, label: "Community" },
   { href: "/tasks", icon: LayoutGrid, label: "Tasks" },
   { href: "/gamification", icon: Trophy, label: "Quests" },
-  { href: "/affiliate", icon: Users, label: "Affiliate" },
   { href: "/profile", icon: User, label: "Profile" },
 ];
+
+const desktopExtraItems = [{ href: "/affiliate", icon: Users, label: "Affiliate" }];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -24,6 +26,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="text-2xl font-bold gradient-text mb-8 px-2">ELY</Link>
         <nav className="space-y-1 flex-1">
           {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors min-h-[44px]",
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "bg-ely-primary/20 text-white"
+                  : "text-ely-muted hover:text-white hover:bg-white/5"
+              )}
+            >
+              <item.icon size={20} />
+              {item.label}
+            </Link>
+          ))}
+          {desktopExtraItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -62,7 +79,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => router.push(item.href)}
               className={cn(
                 "flex flex-col items-center gap-0.5 px-3 py-1 min-h-[44px] min-w-[44px] justify-center",
-                pathname === item.href ? "text-ely-primary" : "text-ely-muted"
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-ely-primary"
+                  : "text-ely-muted"
               )}
             >
               <item.icon size={20} />
