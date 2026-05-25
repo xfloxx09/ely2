@@ -25,4 +25,4 @@ export async function closeDb() {
 
 export * from "./schema/index.js";
 export { drizzle };
-export { ensurePlatformSettingsTable, ensureSocialTables } from "./ensure-schema.js";
+export { ensurePlatformSettingsTable, ensureSocialTables, ensureStorySessionTable } from "./ensure-schema.js";

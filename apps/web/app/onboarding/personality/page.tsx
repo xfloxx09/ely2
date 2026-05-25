@@ -9,6 +9,7 @@ import { PencilScene } from "@/components/onboarding/PencilScene";
 import { AvatarForge } from "@/components/onboarding/AvatarForge";
 import { StoryReveal } from "@/components/onboarding/StoryReveal";
 import { StoryWorldPanel } from "@/components/onboarding/StoryWorldPanel";
+import { StoryDraftPicker, type StorySessionMeta } from "@/components/onboarding/StoryDraftPicker";
 import { ChevronLeft, BookOpen, Feather } from "lucide-react";
 import { parseLlmQuotaFailure } from "@ely/personality";
 
@@ -44,6 +45,7 @@ type StoryJourney = {
   _debug?: {
     storySource?: "gemini" | "openai" | "fallback";
     storyModel?: string;
+    storySeed?: string;
     providerResolved?: "gemini" | "openai" | null;
     storyFailureReason?: string;
     storyPartialFill?: boolean;
@@ -170,6 +172,8 @@ export default function PersonalityOnboarding() {
   const [sceneLoading, setSceneLoading] = useState(false);
   const [storyDebug, setStoryDebug] = useState<StoryJourney["_debug"]>(undefined);
   const [sketchDebug, setSketchDebug] = useState<SceneCacheEntry["_debug"]>(undefined);
+  const [storySession, setStorySession] = useState<StorySessionMeta | null>(null);
+  const [rerolling, setRerolling] = useState(false);
 
   const beat = story?.beats[beatIndex];
   const totalBeats = story?.beats.length ?? 30;
@@ -243,15 +247,60 @@ export default function PersonalityOnboarding() {
     []
   );
 
-  useEffect(() => {
-    apiFetch("/personality/story/generate", { method: "POST" })
-      .then((data: StoryJourney) => {
-        setStory(data);
-        setStoryDebug(data._debug ?? undefined);
-        setPhase("prologue");
-      })
-      .catch(() => setPhase("prologue"));
+  const applyStory = useCallback((data: StoryJourney & { session?: StorySessionMeta }) => {
+    setStory(data);
+    setStoryDebug(data._debug ?? undefined);
+    if (data.session) setStorySession(data.session);
+    setBeatIndex(0);
+    setViewSceneIndex(0);
+    setResponses({});
+    setSceneCache({});
+    setSelectedValue(null);
+    setReadyToAdvance(false);
+    setAvatarPreview(null);
+    setBlur(40);
+    setProgress(0);
   }, []);
+
+  const loadInitialStory = useCallback(async () => {
+    const data = await apiFetch("/personality/story/generate", { method: "POST" });
+    applyStory(data);
+    setPhase("prologue");
+  }, [applyStory]);
+
+  useEffect(() => {
+    loadInitialStory().catch(() => setPhase("prologue"));
+  }, [loadInitialStory]);
+
+  async function rerollStory() {
+    if (!storySession?.rerollsRemaining) return;
+    setRerolling(true);
+    try {
+      const data = await apiFetch("/personality/story/generate", {
+        method: "POST",
+        body: JSON.stringify({ reroll: true }),
+      });
+      applyStory(data);
+    } catch (err: unknown) {
+      const body = err instanceof Error ? (err as Error & { body?: { session?: StorySessionMeta } }).body : undefined;
+      if (body?.session) setStorySession(body.session);
+    } finally {
+      setRerolling(false);
+    }
+  }
+
+  async function selectDraft(draftId: string) {
+    if (draftId === storySession?.selectedDraftId) return;
+    try {
+      const data = await apiFetch("/personality/story/select", {
+        method: "POST",
+        body: JSON.stringify({ draftId }),
+      });
+      applyStory({ ...data.story, session: data.session });
+    } catch {
+      /* keep current */
+    }
+  }
 
   useEffect(() => {
     if (!story || phase !== "story") return;
@@ -369,7 +418,7 @@ export default function PersonalityOnboarding() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="relative mx-auto flex min-h-[80vh] max-w-lg flex-col justify-center"
+          className="relative mx-auto flex min-h-[80vh] max-w-2xl flex-col justify-center"
         >
           <div className="mb-6 flex items-center gap-2 text-ely-accent">
             <BookOpen size={18} />
@@ -400,6 +449,7 @@ export default function PersonalityOnboarding() {
               <span className="font-semibold text-amber-200">Debug</span>
               {" · "}
               Story: {story._debug.storySource} ({story._debug.storyModel})
+              {story._debug.storySeed ? ` · seed: ${story._debug.storySeed.slice(0, 8)}` : ""}
               {story._debug.providerResolved
                 ? ` · configured: ${story._debug.providerResolved}`
                 : ""}
@@ -421,6 +471,16 @@ export default function PersonalityOnboarding() {
             </p>
           )}
 
+          {storySession && (
+            <StoryDraftPicker
+              session={storySession}
+              selectedDraftId={storySession.selectedDraftId}
+              onSelect={selectDraft}
+              onReroll={rerollStory}
+              rerolling={rerolling}
+            />
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -433,6 +493,7 @@ export default function PersonalityOnboarding() {
                 fetchSceneForBeat(0, undefined, undefined, true);
                 fetchPreview({}, 0, story.beats);
               }}
+              disabled={rerolling}
               className="w-full sm:w-auto"
             >
               <Feather size={16} className="mr-2" />

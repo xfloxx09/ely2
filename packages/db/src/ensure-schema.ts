@@ -105,3 +105,23 @@ export async function ensureSocialTables(): Promise<void> {
 
   socialTablesEnsured = true;
 }
+
+let storySessionTableEnsured = false;
+
+/** Creates personality story session table for onboarding rerolls. */
+export async function ensureStorySessionTable(): Promise<void> {
+  if (storySessionTableEnsured) return;
+
+  const db = getDb();
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "personality_story_sessions" (
+      "user_id" uuid PRIMARY KEY NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "rerolls_used" integer DEFAULT 0 NOT NULL,
+      "selected_draft_id" text,
+      "drafts" jsonb DEFAULT '[]'::jsonb NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL
+    )
+  `);
+
+  storySessionTableEnsured = true;
+}

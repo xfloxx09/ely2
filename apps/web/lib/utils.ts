@@ -35,7 +35,9 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
+    const error = new Error(err.error || "Request failed") as Error & { body?: Record<string, unknown> };
+    error.body = err;
+    throw error;
   }
   return res.json();
 }

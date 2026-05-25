@@ -17,7 +17,7 @@ export function StoryWorldPanel({
   const rows = [
     { icon: BookOpen, label: "Framing", value: worldContext.framing },
     { icon: MapPin, label: "Where", value: worldContext.place },
-    { icon: Clock, label: "When", value: worldContext.timeline },
+    { icon: Clock, label: "Timeline", value: worldContext.timeline },
     { icon: User, label: "You", value: worldContext.yourRole },
     { icon: Sparkles, label: "Mood", value: worldContext.mood },
   ];

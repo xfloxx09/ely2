@@ -26,6 +26,11 @@ import {
   generateUserAvatar,
 } from "./services.js";
 import {
+  generateStoryForUser,
+  getStorySessionForUser,
+  selectStoryDraft,
+} from "./story-session.js";
+import {
   createCheckoutSession,
   createCreditCheckout,
   createPortalSession,
@@ -147,22 +152,60 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       const user = await getUserById(userId!);
       const platformConfig = await getPlatformConfig();
       const llmKeys = toLlmKeySource(platformConfig);
-      const story = await generateStoryJourney(userId!, user?.name || undefined, llmKeys);
-      const sketchConfigured = resolveSketchCapabilities({
-        replicateToken: platformConfig.replicateApiToken,
-        geminiKey: platformConfig.geminiApiKey,
-        geminiModel: platformConfig.geminiModel,
-      });
-      return {
-        status: 200,
-        body: {
-          ...story,
-          _debug: {
-            ...story._debug,
-            sketchConfigured,
+      const reroll = (body as { reroll?: boolean } | undefined)?.reroll === true;
+
+      try {
+        const { story, session } = await generateStoryForUser(
+          userId!,
+          user?.name || undefined,
+          user?.tier ?? "FREE",
+          llmKeys,
+          { reroll }
+        );
+        const sketchConfigured = resolveSketchCapabilities({
+          replicateToken: platformConfig.replicateApiToken,
+          geminiKey: platformConfig.geminiApiKey,
+          geminiModel: platformConfig.geminiModel,
+        });
+        return {
+          status: 200,
+          body: {
+            ...story,
+            session,
+            _debug: {
+              ...story._debug,
+              sketchConfigured,
+            },
           },
-        },
-      };
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Story generation failed";
+        if (message === "No rerolls remaining") {
+          const session = (err as Error & { session?: Awaited<ReturnType<typeof getStorySessionForUser>> }).session
+            ?? (await getStorySessionForUser(userId!, user?.tier ?? "FREE"));
+          return { status: 403, body: { error: message, session } };
+        }
+        throw err;
+      }
+    }
+
+    if (method === "GET" && path === "/personality/story/session") {
+      const user = await getUserById(userId!);
+      const session = await getStorySessionForUser(userId!, user?.tier ?? "FREE");
+      return { status: 200, body: session };
+    }
+
+    if (method === "POST" && path === "/personality/story/select") {
+      const user = await getUserById(userId!);
+      const { draftId } = body as { draftId: string };
+      if (!draftId) return { status: 400, body: { error: "draftId required" } };
+      try {
+        const result = await selectStoryDraft(userId!, user?.tier ?? "FREE", draftId);
+        return { status: 200, body: result };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not select story";
+        return { status: 404, body: { error: message } };
+      }
     }
 
     if (method === "POST" && path === "/personality/story/preview") {

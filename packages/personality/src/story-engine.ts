@@ -45,7 +45,33 @@ export type StoryGenerationDebug = {
   storyFailureReason?: string;
   storyPartialFill?: boolean;
   storyWarnings?: string[];
+  storySeed?: string;
 };
+
+export type StoryGenerationOptions = {
+  storySeed?: string;
+};
+
+export const STORY_REROLL_LIMITS = {
+  FREE: 1,
+  PLUS: 3,
+  PRO: 10,
+} as const;
+
+export type StoryTier = keyof typeof STORY_REROLL_LIMITS;
+
+export function storyRerollLimitForTier(tier: string | undefined | null): number {
+  if (tier === "PRO") return STORY_REROLL_LIMITS.PRO;
+  if (tier === "PLUS") return STORY_REROLL_LIMITS.PLUS;
+  return STORY_REROLL_LIMITS.FREE;
+}
+
+export function createStorySeed(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
 
 const SETTINGS = [
   "a misty coastal town where lanterns glow at dusk",
@@ -53,6 +79,55 @@ const SETTINGS = [
   "a floating garden above the clouds",
   "a midnight train crossing forgotten stars",
   "a quiet city where dreams leak into the streets",
+  "a rain-slick neon district after the last tram",
+  "a sun-baked desert caravan route between red mesas",
+  "a bioluminescent reef city beneath glass domes",
+  "a mountain monastery where wind carries old songs",
+  "a reclaimed space station orbiting a violet gas giant",
+  "a medieval market town on the eve of a comet",
+  "a sleepy lakeside village in perpetual golden hour",
+  "an underground jazz club built in a converted vault",
+  "a bamboo forest path lit by fireflies at twilight",
+  "a polar research outpost during the endless night",
+];
+
+const STORY_GENRES = [
+  "intimate character drama",
+  "gentle mystery with wonder",
+  "survival journey with heart",
+  "magical realism in everyday life",
+  "soft sci-fi exploration",
+  "historical adventure",
+  "dreamlike allegory",
+  "cozy fantasy road tale",
+  "noir-tinged investigation",
+  "coming-of-age odyssey",
+];
+
+const STORY_TONES = [
+  "hopeful and curious",
+  "melancholic but warm",
+  "playful and surreal",
+  "grounded and reflective",
+  "tense yet compassionate",
+  "mythic and lyrical",
+];
+
+const TIMELINE_ERAS = [
+  "Modern era — 2026",
+  "Near future — 2087",
+  "Late 20th century — 1989",
+  "Victorian era — 1880s",
+  "Industrial Revolution — 1840s",
+  "Age of Sail — 1770s",
+  "Renaissance — 1520s",
+  "Medieval period — 1240s",
+  "Iron Age — 600 BCE",
+  "Bronze Age — 1200 BCE",
+  "Ancient Egypt — 1400 BCE",
+  "Classical antiquity — 430 BCE",
+  "Mythic prehistory — timeless, before written history",
+  "Post-apocalyptic future — 50 years after the collapse",
 ];
 
 const CHAPTER_TITLES = [
@@ -69,7 +144,27 @@ const CHAPTER_TITLES = [
 ];
 
 function pick<T>(arr: T[], seed: number): T {
-  return arr[seed % arr.length]!;
+  return arr[Math.abs(seed) % arr.length]!;
+}
+
+function hashString(input: string): number {
+  return input.split("").reduce((acc, char, index) => acc + char.charCodeAt(0) * (index + 1), 0);
+}
+
+function creativeBriefForSeed(storySeed: string) {
+  const h = hashString(storySeed);
+  const timelineEra = pick(TIMELINE_ERAS, h + 19);
+  return {
+    settingHint: pick(SETTINGS, h),
+    genreHint: pick(STORY_GENRES, h + 7),
+    toneHint: pick(STORY_TONES, h + 13),
+    timelineEra,
+    runId: storySeed.slice(0, 12),
+  };
+}
+
+function settingForSeed(storySeed: string): string {
+  return creativeBriefForSeed(storySeed).settingHint;
 }
 
 /** Story-flavored answers that still map to standard BFI raw scores (1–5 = agree with statement). */
@@ -273,7 +368,7 @@ function normalizeWorldContext(
 ): StoryWorldContext {
   return {
     framing: raw?.framing?.trim() || "A fictional fable — symbolic and immersive, not literal history",
-    timeline: raw?.timeline?.trim() || "One continuous journey over a few days in the same era",
+    timeline: raw?.timeline?.trim() || "Modern era — present day, over a few continuous days",
     place: raw?.place?.trim() || setting,
     yourRole:
       raw?.yourRole?.trim() ||
@@ -304,11 +399,16 @@ function scenePromptFromArc(setting: string, chapter: number, sceneDetail: strin
   return `${setting}, ${sceneDetail}, chapter ${chapter}, continuous story journey, pencil sketch, graphite on paper, no text`;
 }
 
-export function buildFallbackStory(userId: string, userName?: string): StoryJourney {
-  const seed = userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+export function buildFallbackStory(
+  userId: string,
+  userName?: string,
+  storySeed?: string
+): StoryJourney {
+  const seedKey = storySeed || userId;
   const hero = userName?.split(" ")[0] || "You";
-  const setting = pick(SETTINGS, seed);
-  const title = `The Awakening of ${hero}`;
+  const setting = settingForSeed(seedKey);
+  const brief = creativeBriefForSeed(seedKey);
+  const title = `The ${brief.genreHint.split(" ")[0] ?? "Awakening"} of ${hero}`;
   const arc = buildContinuousArc(hero, setting);
 
   const beats: StoryBeat[] = BFI2_SHORT.map((q, i) => {
@@ -332,24 +432,31 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
     prologue: `${hero} steps into ${setting} with a blank map that only fills when their story is told truthfully. Over thirty moments, one journey unfolds — from the first lantern to the mirror pool where a companion takes shape. This is not a test. It is the tale of how ${hero} becomes whole.`,
     heroName: hero,
     setting,
-    worldContext: normalizeWorldContext(undefined, hero, setting),
+    worldContext: normalizeWorldContext(
+      {
+        timeline: `${brief.timelineEra} — the events unfold over a few continuous days within this period`,
+      },
+      hero,
+      setting
+    ),
     beats,
   };
 }
 
 const STORY_BATCH_SYSTEM_PROMPT = `You write ONE continuous, linear story for personality discovery. Return compact JSON only.
+Each run must be a completely NEW story — original title, world, plot, and mood. Never reuse boilerplate fantasy quest templates.
 Batch 1: title, prologue (2 sentences max), heroName, setting, worldContext, beats (exactly N items).
 Later batches: beats array only (exactly N items).
 
 worldContext (batch 1 only): {
   "framing": "Fictional fable | Dream allegory | Historical fiction | etc. — state clearly if this is real, invented, or symbolic",
-  "timeline": "When this happens — be specific (e.g. three autumn days, one moonlit night)",
-  "place": "Where the user is situated — geography, era, atmosphere",
+  "timeline": "MUST name a historical era or specific year/century, then the story span. Examples: 'Bronze Age, ~1200 BCE, three moonlit nights' | 'Modern era, 2026, one rainy weekend' | 'Industrial Revolution, 1840s, across five days'. Never vague timelines without an era or year.",
+  "place": "Where the user is situated — geography, atmosphere (era belongs in timeline, not here)",
   "yourRole": "1-2 sentences: who the player is and how to inhabit this story",
   "mood": "Overall emotional tone"
 }
 
-Rules: Same hero, same world bible, cause-and-effect between beats. No random genre or timeline jumps.
+Rules: Same hero, same world bible, cause-and-effect between beats. No random genre or timeline jumps within one story.
 Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence advancing the SAME plot), question (one line), choices (5 label+value), scenePrompt (brief).
 Choice values 5,4,3,2,1 once each. Labels under 12 words. Never mention Big Five or psychology.`;
 
@@ -474,7 +581,7 @@ async function fetchStoryBatchSingle(
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const temperature = attempt === 0 ? 0.85 : attempt === 1 ? 0.65 : 0.45;
+      const temperature = attempt === 0 ? (batchIndex === 0 ? 0.92 : 0.85) : attempt === 1 ? 0.65 : 0.45;
       const raw =
         provider === "gemini"
           ? await geminiGenerateText({
@@ -622,7 +729,7 @@ async function callStoryChatOpenAi(
 function buildBatchPrompt(
   batch: number,
   hero: string,
-  userId: string,
+  storySeed: string,
   meta: StoryBatchMeta | null,
   setting: string,
   storySoFar: string,
@@ -632,8 +739,16 @@ function buildBatchPrompt(
   bfiSlice: unknown
 ): string {
   if (batch === 0) {
-    return `Create the opening of a unique continuous story for "${hero}" (seed: ${userId.slice(0, 8)}).
-Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
+    const brief = creativeBriefForSeed(storySeed);
+    return `Create a BRAND NEW story for "${hero}". This run id is unique: ${brief.runId}.
+Use the creative brief below as inspiration only — invent fresh details, an original title, and a distinct plot:
+- Genre vibe: ${brief.genreHint}
+- Setting inspiration: ${brief.settingHint}
+- Emotional tone: ${brief.toneHint}
+- Timeline inspiration: ${brief.timelineEra} (you MUST state a clear era or year in worldContext.timeline)
+
+Do NOT copy generic "blank map / mirror pool / lantern quest" templates. Build something specific to this brief.
+Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine (personality moments to weave in — reinterpret creatively):
 ${JSON.stringify(arcHints)}
 
 Map these personality moments in order (same bfiId):
@@ -667,10 +782,11 @@ async function generateStoryInBatches(
   userId: string,
   userName: string | undefined,
   provider: "gemini" | "openai",
-  llmKeys?: LlmKeySource
+  llmKeys: LlmKeySource | undefined,
+  storySeed: string
 ): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean } | null> {
   const hero = userName || "Traveler";
-  const setting = pick(SETTINGS, userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0));
+  const setting = settingForSeed(storySeed);
   const arc = buildContinuousArc(hero, setting);
   let meta: StoryBatchMeta | null = null;
   const allBeats: StoryBeat[] = [];
@@ -702,7 +818,7 @@ async function generateStoryInBatches(
     const prompt = buildBatchPrompt(
       batch,
       hero,
-      userId,
+      storySeed,
       meta,
       setting,
       storySoFar,
@@ -846,18 +962,21 @@ function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
 export async function generateStoryJourney(
   userId: string,
   userName?: string,
-  llmKeys?: LlmKeySource
+  llmKeys?: LlmKeySource,
+  options?: StoryGenerationOptions
 ): Promise<StoryJourney> {
+  const storySeed = options?.storySeed || createStorySeed();
   const providerChain = resolveLlmProviderChain(llmKeys);
   const providerResolved = providerChain[0] ?? null;
 
   const fallback = (reason: string): StoryJourney => ({
-    ...buildFallbackStory(userId, userName),
+    ...buildFallbackStory(userId, userName, storySeed),
     _debug: {
       storySource: "fallback",
       storyModel: "built-in-arc",
       providerResolved,
       storyFailureReason: reason,
+      storySeed,
     },
   });
 
@@ -870,7 +989,7 @@ export async function generateStoryJourney(
   for (const provider of providerChain) {
     const storyModel = storyModelFor(provider, llmKeys);
     try {
-      const result = await generateStoryInBatches(userId, userName, provider, llmKeys);
+      const result = await generateStoryInBatches(userId, userName, provider, llmKeys, storySeed);
       if (result) {
         return {
           ...result.journey,
@@ -880,6 +999,7 @@ export async function generateStoryJourney(
             providerResolved,
             storyPartialFill: result.partialFill,
             storyWarnings: result.warnings.length ? result.warnings : undefined,
+            storySeed,
           },
         };
       }
