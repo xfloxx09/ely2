@@ -64,7 +64,10 @@ NEXT_PUBLIC_WS_URL=https://your-ws-service.up.railway.app
 
 Railway sets `PORT` automatically — Next.js picks it up.
 
-**502 / connection refused?** Ensure start uses `-H 0.0.0.0` (fixed in latest repo). Redeploy after pulling.
+**502 / connection refused?**
+1. Railway → **web** service → **Settings** → **Networking** → ensure the port matches `PORT` (often **8080**). Remove any hardcoded `3000` target port.
+2. Ensure `HOSTNAME=0.0.0.0` is set (or use latest deploy with standalone start script).
+3. Redeploy after pulling latest code.
 
 ## After setting env vars
 
