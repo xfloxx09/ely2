@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, users, communicationProfiles, userApiKeys, elyCredits } from "@ely/db";
-import { getNeutralProfile, resolveLlmProvider, getGeminiModel } from "@ely/personality";
+import { getNeutralProfile, getGeminiModel } from "@ely/personality";
 import {
   buildSystemPrompt,
   completeElyCore,
@@ -20,11 +20,16 @@ import {
   logTaskExecution,
   recordChatActivity,
 } from "@ely/chat";
+import { getPlatformConfig, toLlmKeySource, getActiveLlmProvider } from "./platform-config.js";
 
 export async function handleChatMessage(userId: string, content: string) {
   const db = getDb();
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) throw new Error("User not found");
+
+  const platformConfig = await getPlatformConfig();
+  const llmKeys = toLlmKeySource(platformConfig);
+  const activeProvider = await getActiveLlmProvider();
 
   const conv = await getOrCreateConversation(userId);
   await saveMessage(conv.id, "USER", content);
@@ -48,7 +53,10 @@ export async function handleChatMessage(userId: string, content: string) {
 
   const nexusCmd = parseNexusCommand(content);
   let fullResponse = "";
-  let modelUsed = resolveLlmProvider() === "gemini" ? getGeminiModel() : "gpt-4o-mini";
+  let modelUsed =
+    activeProvider === "gemini"
+      ? getGeminiModel({ geminiModel: platformConfig.geminiModel })
+      : "gpt-4o-mini";
 
   if (nexusCmd && (user.tier === "PLUS" || user.tier === "PRO")) {
     const [apiKeyRow] = await db
@@ -64,9 +72,9 @@ export async function handleChatMessage(userId: string, content: string) {
       const [credits] = await db.select().from(elyCredits).where(eq(elyCredits.userId, userId)).limit(1);
       if (!credits || credits.balance <= 0) throw new Error("No API key or credits available");
       await db.update(elyCredits).set({ balance: credits.balance - 1 }).where(eq(elyCredits.userId, userId));
-      apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+      apiKey = platformConfig.geminiApiKey || platformConfig.openaiApiKey || undefined;
     } else {
-      apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+      apiKey = platformConfig.geminiApiKey || platformConfig.openaiApiKey || undefined;
     }
 
     if (!apiKey) throw new Error("Model Nexus unavailable");
@@ -107,7 +115,7 @@ export async function handleChatMessage(userId: string, content: string) {
           role: m.role.toLowerCase() as "user" | "assistant",
           content: m.content,
         }));
-      fullResponse = await completeElyCore(chatMessages, systemPrompt);
+      fullResponse = await completeElyCore(chatMessages, systemPrompt, { llmKeys });
     }
   }
 
@@ -115,7 +123,7 @@ export async function handleChatMessage(userId: string, content: string) {
   await recordChatActivity(userId);
 
   try {
-    const newMemories = await extractMemories(content, fullResponse);
+    const newMemories = await extractMemories(content, fullResponse, { llmKeys });
     for (const mem of newMemories) {
       await saveMemory(userId, mem);
     }

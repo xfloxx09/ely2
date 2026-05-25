@@ -3,26 +3,36 @@ export type GeminiMessage = {
   content: string;
 };
 
-export function resolveLlmProvider(): "openai" | "gemini" | null {
-  const preferred = process.env.LLM_PROVIDER?.toLowerCase();
-  if (preferred === "gemini" && process.env.GEMINI_API_KEY) return "gemini";
-  if (preferred === "openai" && process.env.OPENAI_API_KEY) return "openai";
-  if (process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY) return "gemini";
-  if (process.env.OPENAI_API_KEY) return "openai";
-  if (process.env.GEMINI_API_KEY) return "gemini";
+export type LlmKeySource = {
+  geminiKey?: string | null;
+  openaiKey?: string | null;
+  llmProvider?: string | null;
+  geminiModel?: string | null;
+};
+
+export function resolveLlmProvider(source?: LlmKeySource): "openai" | "gemini" | null {
+  const gemini = source?.geminiKey ?? process.env.GEMINI_API_KEY;
+  const openai = source?.openaiKey ?? process.env.OPENAI_API_KEY;
+  const preferred = (source?.llmProvider ?? process.env.LLM_PROVIDER)?.toLowerCase();
+
+  if (preferred === "gemini" && gemini) return "gemini";
+  if (preferred === "openai" && openai) return "openai";
+  if (gemini && !openai) return "gemini";
+  if (openai) return "openai";
+  if (gemini) return "gemini";
   return null;
 }
 
-export function getGeminiModel(): string {
-  return process.env.GEMINI_MODEL || "gemini-2.0-flash";
+export function getGeminiModel(source?: { geminiModel?: string | null }): string {
+  return source?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
 }
 
-async function geminiRequest(body: Record<string, unknown>, apiKey?: string): Promise<string> {
+async function geminiRequest(body: Record<string, unknown>, apiKey?: string, model?: string): Promise<string> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY not configured");
 
-  const model = getGeminiModel();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const resolvedModel = model || getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${key}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -49,6 +59,7 @@ export async function geminiGenerateText(options: {
   maxTokens?: number;
   json?: boolean;
   apiKey?: string;
+  model?: string;
 }): Promise<string> {
   return geminiRequest(
     {
@@ -62,7 +73,8 @@ export async function geminiGenerateText(options: {
         ...(options.json ? { responseMimeType: "application/json" } : {}),
       },
     },
-    options.apiKey
+    options.apiKey,
+    options.model
   );
 }
 
@@ -73,6 +85,7 @@ export async function geminiChatCompletion(options: {
   maxTokens?: number;
   json?: boolean;
   apiKey?: string;
+  model?: string;
 }): Promise<string> {
   const contents = options.messages.map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
@@ -89,6 +102,7 @@ export async function geminiChatCompletion(options: {
         ...(options.json ? { responseMimeType: "application/json" } : {}),
       },
     },
-    options.apiKey
+    options.apiKey,
+    options.model
   );
 }

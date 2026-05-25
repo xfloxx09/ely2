@@ -1,6 +1,6 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
-import { geminiGenerateText, resolveLlmProvider } from "./gemini.js";
+import { geminiGenerateText, resolveLlmProvider, type LlmKeySource } from "./gemini.js";
 
 export type StoryChoice = {
   label: string;
@@ -159,9 +159,9 @@ Never mention Big Five or psychology. Make it magical, literary, and unique.`;
 export async function generateStoryJourney(
   userId: string,
   userName?: string,
-  apiKey?: string
+  llmKeys?: LlmKeySource
 ): Promise<StoryJourney> {
-  const provider = apiKey ? "openai" : resolveLlmProvider();
+  const provider = resolveLlmProvider(llmKeys);
   if (!provider) {
     return buildFallbackStory(userId, userName);
   }
@@ -186,11 +186,14 @@ Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
         temperature: 0.9,
         maxTokens: 8192,
         json: true,
-        apiKey: apiKey || undefined,
+        apiKey: llmKeys?.geminiKey ?? undefined,
+        model: llmKeys?.geminiModel ?? undefined,
       });
     } else {
+      const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
+      if (!openaiKey) return buildFallbackStory(userId, userName);
       const OpenAI = (await import("openai")).default;
-      const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
+      const openai = new OpenAI({ apiKey: openaiKey });
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         temperature: 0.9,

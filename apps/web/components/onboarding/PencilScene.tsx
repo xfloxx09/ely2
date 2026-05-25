@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "drawing" | "erasing";
@@ -9,15 +10,39 @@ type Phase = "idle" | "drawing" | "erasing";
 type Props = {
   imageUrl: string | null;
   beatKey: string;
+  sceneIndex: number;
+  maxSceneIndex: number;
+  onPrev?: () => void;
+  onNext?: () => void;
+  animate?: boolean;
   className?: string;
 };
 
-export function PencilScene({ imageUrl, beatKey, className }: Props) {
+export function PencilScene({
+  imageUrl,
+  beatKey,
+  sceneIndex,
+  maxSceneIndex,
+  onPrev,
+  onNext,
+  animate = true,
+  className,
+}: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [displayUrl, setDisplayUrl] = useState(imageUrl);
 
+  const canPrev = sceneIndex > 0;
+  const canNext = sceneIndex < maxSceneIndex;
+
   useEffect(() => {
     if (!imageUrl) return;
+
+    if (!animate) {
+      setDisplayUrl(imageUrl);
+      setPhase("idle");
+      return;
+    }
+
     if (displayUrl && displayUrl !== imageUrl) {
       setPhase("erasing");
       const eraseTimer = setTimeout(() => {
@@ -26,9 +51,10 @@ export function PencilScene({ imageUrl, beatKey, className }: Props) {
       }, 900);
       return () => clearTimeout(eraseTimer);
     }
+
     setDisplayUrl(imageUrl);
     setPhase("drawing");
-  }, [imageUrl, beatKey]);
+  }, [imageUrl, beatKey, animate]);
 
   useEffect(() => {
     if (phase !== "drawing") return;
@@ -57,83 +83,113 @@ export function PencilScene({ imageUrl, beatKey, className }: Props) {
           <motion.div
             key={beatKey}
             className="absolute inset-0"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: animate ? 0 : 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: animate ? 0.3 : 0.15 }}
           >
             <motion.div
               className="absolute inset-0 bg-cover bg-center"
               style={{
                 backgroundImage: `url("${displayUrl}")`,
-                filter: "contrast(1.05) grayscale(0.15) sepia(0.12)",
+                filter: "contrast(1.05) grayscale(0.12) sepia(0.1)",
               }}
-              initial={{ clipPath: "inset(0 100% 0 0 round 1rem)" }}
+              initial={animate ? { clipPath: "inset(0 100% 0 0 round 1rem)" } : false}
               animate={{
                 clipPath:
-                  phase === "erasing"
-                    ? "inset(0 100% 0 0 round 1rem)"
-                    : phase === "drawing"
-                      ? "inset(0 0% 0 0 round 1rem)"
+                  !animate || phase === "idle"
+                    ? "inset(0 0% 0 0 round 1rem)"
+                    : phase === "erasing"
+                      ? "inset(0 100% 0 0 round 1rem)"
                       : "inset(0 0% 0 0 round 1rem)",
               }}
               transition={{
-                duration: phase === "erasing" ? 0.85 : 1.35,
+                duration: !animate ? 0.2 : phase === "erasing" ? 0.85 : 1.35,
                 ease: [0.22, 1, 0.36, 1],
               }}
             />
 
-            <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
-              {[...Array(18)].map((_, i) => (
-                <motion.line
-                  key={i}
-                  x1={20 + i * 18}
-                  y1={0}
-                  x2={40 + i * 16}
-                  y2={320}
-                  stroke="rgba(255,255,255,0.06)"
-                  strokeWidth={0.6}
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{
-                    pathLength: phase === "drawing" ? 1 : phase === "erasing" ? 0 : 1,
-                    opacity: phase === "idle" ? 0.35 : 0.7,
-                  }}
-                  transition={{ delay: i * 0.04, duration: 0.8 }}
-                />
-              ))}
-            </svg>
+            {animate && (
+              <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
+                {[...Array(18)].map((_, i) => (
+                  <motion.line
+                    key={i}
+                    x1={20 + i * 18}
+                    y1={0}
+                    x2={40 + i * 16}
+                    y2={320}
+                    stroke="rgba(255,255,255,0.06)"
+                    strokeWidth={0.6}
+                    initial={{ pathLength: 0, opacity: 0 }}
+                    animate={{
+                      pathLength: phase === "drawing" ? 1 : phase === "erasing" ? 0 : 1,
+                      opacity: phase === "idle" ? 0.35 : 0.7,
+                    }}
+                    transition={{ delay: i * 0.04, duration: 0.8 }}
+                  />
+                ))}
+              </svg>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      <motion.div
-        className="pointer-events-none absolute z-10"
-        animate={
-          phase === "drawing"
-            ? { left: ["0%", "92%"], top: ["8%", "75%"], opacity: [0, 1, 1, 0] }
-            : phase === "erasing"
-              ? { left: ["92%", "0%"], top: ["75%", "8%"], opacity: [0, 1, 1, 0] }
-              : { opacity: 0 }
-        }
-        transition={{ duration: phase === "erasing" ? 0.85 : 1.35, ease: "easeInOut" }}
-      >
-        <div
-          className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/50 backdrop-blur-sm",
-            phase === "erasing" && "bg-white/10"
-          )}
+      {animate && (
+        <motion.div
+          className="pointer-events-none absolute z-10"
+          animate={
+            phase === "drawing"
+              ? { left: ["0%", "92%"], top: ["8%", "75%"], opacity: [0, 1, 1, 0] }
+              : phase === "erasing"
+                ? { left: ["92%", "0%"], top: ["75%", "8%"], opacity: [0, 1, 1, 0] }
+                : { opacity: 0 }
+          }
+          transition={{ duration: phase === "erasing" ? 0.85 : 1.35, ease: "easeInOut" }}
         >
-          {phase === "erasing" ? (
-            <span className="text-[10px] font-medium uppercase tracking-wider text-white/70">⌫</span>
-          ) : (
-            <span className="h-3 w-0.5 rotate-45 rounded-full bg-white/80" />
-          )}
-        </div>
-      </motion.div>
+          <div
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/50 backdrop-blur-sm",
+              phase === "erasing" && "bg-white/10"
+            )}
+          >
+            {phase === "erasing" ? (
+              <span className="text-[10px] font-medium uppercase tracking-wider text-white/70">⌫</span>
+            ) : (
+              <span className="h-3 w-0.5 rotate-45 rounded-full bg-white/80" />
+            )}
+          </div>
+        </motion.div>
+      )}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
-      <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/50">
-        Sketch
+      <button
+        type="button"
+        onClick={onPrev}
+        disabled={!canPrev}
+        aria-label="Previous story illustration"
+        className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white backdrop-blur-sm transition-all hover:bg-black/70 disabled:pointer-events-none disabled:opacity-25"
+      >
+        <ChevronLeft size={20} />
+      </button>
+
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={!canNext}
+        aria-label="Next story illustration"
+        className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white backdrop-blur-sm transition-all hover:bg-black/70 disabled:pointer-events-none disabled:opacity-25"
+      >
+        <ChevronRight size={20} />
+      </button>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#0a0a0f]/80 to-transparent" />
+
+      <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2">
+        <span className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/50">
+          Story sketch
+        </span>
+        <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-[10px] text-white/40">
+          {sceneIndex + 1} / {maxSceneIndex + 1}
+        </span>
       </div>
     </div>
   );

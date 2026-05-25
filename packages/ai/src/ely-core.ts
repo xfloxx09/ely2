@@ -1,6 +1,40 @@
 import OpenAI from "openai";
-import type { CommunicationProfile } from "@ely/personality";
+import type { CommunicationProfile, LlmKeySource } from "@ely/personality";
 import { geminiChatCompletion, resolveLlmProvider } from "@ely/personality";
+
+export type ElyLlmOptions = {
+  llmKeys?: LlmKeySource;
+  apiKey?: string;
+  provider?: "openai" | "gemini";
+};
+
+function geminiModelFromOptions(options?: ElyLlmOptions): string | undefined {
+  return options?.llmKeys?.geminiModel ?? undefined;
+}
+
+function resolveElyLlm(options?: ElyLlmOptions): { provider: "openai" | "gemini" | null; apiKey?: string } {
+  if (options?.apiKey && options.provider) {
+    return { provider: options.provider, apiKey: options.apiKey };
+  }
+  if (options?.apiKey) {
+    return { provider: "openai", apiKey: options.apiKey };
+  }
+
+  const provider = resolveLlmProvider(options?.llmKeys);
+  if (provider === "gemini") {
+    return {
+      provider,
+      apiKey: options?.llmKeys?.geminiKey ?? process.env.GEMINI_API_KEY ?? undefined,
+    };
+  }
+  if (provider === "openai") {
+    return {
+      provider,
+      apiKey: options?.llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY ?? undefined,
+    };
+  }
+  return { provider: null };
+}
 
 const ELY_BASE_PROMPT = `You are ELY, a personal AI companion, coach, and concierge. You are warm, capable, and deeply attuned to your user. You help with everyday tasks through natural conversation. You are NOT a therapist — encourage real human connection when appropriate. Be helpful, honest, and respect the user's authentic self.`;
 
@@ -25,14 +59,15 @@ export function buildSystemPrompt(
 export async function* streamElyCore(
   messages: { role: "user" | "assistant" | "system"; content: string }[],
   systemPrompt: string,
-  apiKey?: string
+  options?: ElyLlmOptions
 ): AsyncGenerator<string> {
-  const provider = apiKey ? "openai" : resolveLlmProvider();
+  const { provider, apiKey } = resolveElyLlm(options);
   if (provider === "gemini") {
     const text = await geminiChatCompletion({
       system: systemPrompt,
       messages: messages.filter((m) => m.role !== "system") as { role: "user" | "assistant"; content: string }[],
       apiKey,
+      model: geminiModelFromOptions(options),
     });
     yield text;
     return;
@@ -57,14 +92,15 @@ export async function* streamElyCore(
 export async function completeElyCore(
   messages: { role: "user" | "assistant" | "system"; content: string }[],
   systemPrompt: string,
-  apiKey?: string
+  options?: ElyLlmOptions
 ): Promise<string> {
-  const provider = apiKey ? "openai" : resolveLlmProvider();
+  const { provider, apiKey } = resolveElyLlm(options);
   if (provider === "gemini") {
     return geminiChatCompletion({
       system: systemPrompt,
       messages: messages.filter((m) => m.role !== "system") as { role: "user" | "assistant"; content: string }[],
       apiKey,
+      model: geminiModelFromOptions(options),
     });
   }
 
@@ -128,14 +164,14 @@ export function parseNexusCommand(message: string): { model: string; provider: s
 export async function extractMemories(
   userMessage: string,
   assistantResponse: string,
-  apiKey?: string
+  options?: ElyLlmOptions
 ): Promise<string[]> {
   const system =
     'Extract key facts about the user from this conversation that would be useful to remember for future interactions. Return JSON as {"memories":["..."]} with max 3 items. Return {"memories":[]} if nothing notable.';
   const user = `User: ${userMessage}\nAssistant: ${assistantResponse}`;
 
   let raw = "";
-  const provider = apiKey ? "openai" : resolveLlmProvider();
+  const { provider, apiKey } = resolveElyLlm(options);
 
   if (provider === "gemini") {
     raw = await geminiChatCompletion({
@@ -145,6 +181,7 @@ export async function extractMemories(
       maxTokens: 256,
       json: true,
       apiKey,
+      model: geminiModelFromOptions(options),
     });
   } else {
     const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });

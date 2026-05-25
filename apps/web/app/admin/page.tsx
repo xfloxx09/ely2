@@ -4,23 +4,95 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Card, Button } from "@/components/ui";
 import { apiFetch } from "@/lib/utils";
+import { KeyRound, Save, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
+
+type SecretMeta = {
+  configured: boolean;
+  preview: string | null;
+  source: "database" | "environment" | null;
+};
+
+type PlatformSettings = {
+  llmProvider: string;
+  geminiModel: string;
+  activeProvider: "openai" | "gemini" | null;
+  secrets: Record<string, SecretMeta>;
+};
 
 export default function AdminPage() {
   const [users, setUsers] = useState<{ id: string; email: string; tier: string; role: string }[]>([]);
   const [authorized, setAuthorized] = useState(false);
+  const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [llmProvider, setLlmProvider] = useState("gemini");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.0-flash");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [replicateApiToken, setReplicateApiToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     apiFetch("/auth/me")
       .then((d) => {
         if (d.user?.role === "ADMIN") {
           setAuthorized(true);
-          return apiFetch("/admin/users");
+          return Promise.all([apiFetch("/admin/users"), apiFetch("/admin/platform-settings")]);
         }
         throw new Error("Not admin");
       })
-      .then(setUsers)
+      .then(([userList, platformSettings]) => {
+        setUsers(userList);
+        setSettings(platformSettings);
+        setLlmProvider(platformSettings.llmProvider || "gemini");
+        setGeminiModel(platformSettings.geminiModel || "gemini-2.0-flash");
+      })
       .catch(() => setAuthorized(false));
   }, []);
+
+  async function savePlatformSettings() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const payload: Record<string, string | undefined> = {
+        llmProvider,
+        geminiModel,
+      };
+      if (geminiApiKey.trim()) payload.geminiApiKey = geminiApiKey.trim();
+      if (openaiApiKey.trim()) payload.openaiApiKey = openaiApiKey.trim();
+      if (replicateApiToken.trim()) payload.replicateApiToken = replicateApiToken.trim();
+
+      const updated = await apiFetch("/admin/platform-settings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      setSettings(updated);
+      setGeminiApiKey("");
+      setOpenaiApiKey("");
+      setReplicateApiToken("");
+      setMessage({ type: "ok", text: "Platform AI keys saved. Changes apply within ~30 seconds." });
+    } catch (err) {
+      setMessage({ type: "err", text: (err as Error).message || "Failed to save settings" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearKey(key: string) {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const updated = await apiFetch("/admin/platform-settings", {
+        method: "PUT",
+        body: JSON.stringify({ clearKeys: [key] }),
+      });
+      setSettings(updated);
+      setMessage({ type: "ok", text: `${key} removed from database.` });
+    } catch (err) {
+      setMessage({ type: "err", text: (err as Error).message || "Failed to clear key" });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (!authorized) {
     return (
@@ -33,7 +105,95 @@ export default function AdminPage() {
   return (
     <AppShell>
       <div className="p-4 md:p-8 max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold mb-8">Admin Panel</h1>
+        <h1 className="text-2xl font-bold mb-2">Admin Panel</h1>
+        <p className="text-sm text-ely-muted mb-8">Manage platform AI keys without redeploying environment variables.</p>
+
+        <Card className="mb-8 border-ely-primary/20">
+          <div className="flex items-start gap-3 mb-6">
+            <div className="rounded-xl bg-ely-primary/15 p-2.5">
+              <KeyRound size={20} className="text-ely-primary" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">Platform AI Keys</h2>
+              <p className="text-sm text-ely-muted mt-1">
+                Keys are encrypted in the database. Leave a field blank to keep the current key. Active provider:{" "}
+                <span className="text-white font-medium">{settings?.activeProvider || "none configured"}</span>
+              </p>
+            </div>
+          </div>
+
+          {message && (
+            <div
+              className={`mb-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
+                message.type === "ok"
+                  ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                  : "bg-red-500/10 text-red-300 border border-red-500/20"
+              }`}
+            >
+              {message.type === "ok" ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+              {message.text}
+            </div>
+          )}
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-sm text-ely-muted">Default LLM provider</span>
+              <select
+                value={llmProvider}
+                onChange={(e) => setLlmProvider(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-ely-primary/50"
+              >
+                <option value="gemini">Google Gemini (free tier friendly)</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm text-ely-muted">Gemini model</span>
+              <input
+                value={geminiModel}
+                onChange={(e) => setGeminiModel(e.target.value)}
+                placeholder="gemini-2.0-flash"
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-ely-primary/50"
+              />
+            </label>
+
+            <SecretField
+              label="Gemini API key"
+              placeholder="AIza..."
+              value={geminiApiKey}
+              onChange={setGeminiApiKey}
+              meta={settings?.secrets.GEMINI_API_KEY}
+              onClear={() => clearKey("GEMINI_API_KEY")}
+            />
+
+            <SecretField
+              label="OpenAI API key"
+              placeholder="sk-..."
+              value={openaiApiKey}
+              onChange={setOpenaiApiKey}
+              meta={settings?.secrets.OPENAI_API_KEY}
+              onClear={() => clearKey("OPENAI_API_KEY")}
+            />
+
+            <SecretField
+              label="Replicate API token (avatar faces)"
+              placeholder="r8_..."
+              value={replicateApiToken}
+              onChange={setReplicateApiToken}
+              meta={settings?.secrets.REPLICATE_API_TOKEN}
+              onClear={() => clearKey("REPLICATE_API_TOKEN")}
+              className="md:col-span-2"
+            />
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button onClick={savePlatformSettings} disabled={saving}>
+              <Save size={16} className="mr-2" />
+              {saving ? "Saving..." : "Save platform keys"}
+            </Button>
+          </div>
+        </Card>
 
         <div className="grid sm:grid-cols-3 gap-4 mb-8">
           <Card>
@@ -67,5 +227,56 @@ export default function AdminPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function SecretField({
+  label,
+  placeholder,
+  value,
+  onChange,
+  meta,
+  onClear,
+  className = "",
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  meta?: SecretMeta;
+  onClear: () => void;
+  className?: string;
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-sm text-ely-muted">{label}</span>
+        {meta?.configured && (
+          <span className="text-[10px] uppercase tracking-wider text-emerald-400/80">
+            {meta.source === "database" ? "Saved in DB" : "From env var"}
+            {meta.preview ? ` · ${meta.preview}` : ""}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={meta?.configured ? "Enter new key to replace" : placeholder}
+          className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-ely-primary/50"
+        />
+        {meta?.source === "database" && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/30 text-ely-muted hover:text-red-300 hover:border-red-400/30"
+            aria-label={`Clear ${label}`}
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+      </div>
+    </label>
   );
 }

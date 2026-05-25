@@ -4,7 +4,7 @@ import { BFI2_SHORT, BFI2_LONG } from "@ely/personality";
 import {
   generateStoryJourney,
   partialScoresFromResponses,
-  generateSketchSceneSvg,
+  generateStorySceneSvg,
   generateAvatarSilhouetteSvg,
 } from "@ely/personality";
 import {
@@ -36,6 +36,12 @@ import {
 } from "./stripe.js";
 import { createSession, getSessionUser, getAuthToken, getAppUrl } from "./session.js";
 import { handleChatMessage } from "./chat-handler.js";
+import {
+  getAdminPlatformSettings,
+  updateAdminPlatformSettings,
+  getPlatformConfig,
+  toLlmKeySource,
+} from "./platform-config.js";
 
 type ApiRequest = {
   method: string;
@@ -95,7 +101,8 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
 
     if (method === "POST" && path === "/personality/story/generate") {
       const user = await getUserById(userId!);
-      const story = await generateStoryJourney(userId!, user?.name || undefined);
+      const platformConfig = await getPlatformConfig();
+      const story = await generateStoryJourney(userId!, user?.name || undefined, toLlmKeySource(platformConfig));
       return { status: 200, body: story };
     }
 
@@ -113,15 +120,32 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
     }
 
     if (method === "POST" && path === "/personality/story/scene") {
-      const { scenePrompt, seed, answerValue } = body as {
+      const bodyData = body as {
         scenePrompt: string;
         seed: number;
         answerValue?: number;
+        choiceLabel?: string;
+        beatIndex?: number;
+        totalBeats?: number;
+        chapter?: number;
+        chapterTitle?: string;
+        narrative?: string;
+        setting?: string;
+        heroName?: string;
       };
-      const moods = ["shadowed, quiet, inward", "soft, uncertain, misty", "balanced, neutral light", "bright, forward, open", "bold, radiant, vivid"];
-      const mood = answerValue ? moods[Math.min(4, Math.max(0, answerValue - 1))] : "";
-      const prompt = mood ? `${scenePrompt}, ${mood}` : scenePrompt;
-      const imageUrl = generateSketchSceneSvg(prompt, seed ?? Date.now());
+      const imageUrl = generateStorySceneSvg({
+        beatIndex: bodyData.beatIndex ?? 0,
+        totalBeats: bodyData.totalBeats ?? 30,
+        chapter: bodyData.chapter ?? 1,
+        chapterTitle: bodyData.chapterTitle ?? "The Journey",
+        narrative: bodyData.narrative ?? bodyData.scenePrompt,
+        setting: bodyData.setting ?? bodyData.scenePrompt,
+        heroName: bodyData.heroName ?? "Traveler",
+        scenePrompt: bodyData.scenePrompt,
+        answerValue: bodyData.answerValue,
+        choiceLabel: bodyData.choiceLabel,
+        seed: bodyData.seed ?? Date.now(),
+      });
       return { status: 200, body: { imageUrl } };
     }
 
@@ -249,6 +273,27 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       if (user?.role !== "ADMIN") return { status: 403, body: { error: "Forbidden" } };
       const db = getDb();
       return { status: 200, body: await db.select().from(users).limit(100) };
+    }
+
+    if (method === "GET" && path === "/admin/platform-settings") {
+      const user = await getUserById(userId!);
+      if (user?.role !== "ADMIN") return { status: 403, body: { error: "Forbidden" } };
+      return { status: 200, body: await getAdminPlatformSettings() };
+    }
+
+    if (method === "PUT" && path === "/admin/platform-settings") {
+      const user = await getUserById(userId!);
+      if (user?.role !== "ADMIN") return { status: 403, body: { error: "Forbidden" } };
+      const payload = body as {
+        llmProvider?: string;
+        geminiModel?: string;
+        geminiApiKey?: string;
+        openaiApiKey?: string;
+        replicateApiToken?: string;
+        clearKeys?: string[];
+      };
+      const updated = await updateAdminPlatformSettings(userId!, payload);
+      return { status: 200, body: updated };
     }
 
     if (method === "POST" && path === "/webhooks/stripe") {

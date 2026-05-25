@@ -34,38 +34,85 @@ type StoryJourney = {
 
 type Phase = "loading" | "prologue" | "story" | "submitting" | "reveal";
 
+type SceneCacheEntry = {
+  url: string;
+  seed: number;
+};
+
+function sceneSeedForBeat(bfiId: number, answerValue?: number) {
+  return bfiId * 97 + (answerValue ?? 0) * 13;
+}
+
+function choiceLabelForBeat(beat: StoryBeat, answerValue?: number) {
+  if (answerValue === undefined) return undefined;
+  return beat.choices.find((c) => c.value === answerValue)?.label;
+}
+
 export default function PersonalityOnboarding() {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("loading");
   const [story, setStory] = useState<StoryJourney | null>(null);
   const [beatIndex, setBeatIndex] = useState(0);
+  const [viewSceneIndex, setViewSceneIndex] = useState(0);
   const [responses, setResponses] = useState<Record<number, number>>({});
-  const [sceneUrl, setSceneUrl] = useState<string | null>(null);
+  const [sceneCache, setSceneCache] = useState<Record<number, SceneCacheEntry>>({});
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [blur, setBlur] = useState(40);
   const [progress, setProgress] = useState(0);
   const [selectedValue, setSelectedValue] = useState<number | null>(null);
   const [readyToAdvance, setReadyToAdvance] = useState(false);
   const [revealAvatar, setRevealAvatar] = useState<string | null>(null);
-  const [sceneSeed, setSceneSeed] = useState(0);
+  const [sceneAnimating, setSceneAnimating] = useState(true);
 
   const beat = story?.beats[beatIndex];
   const totalBeats = story?.beats.length ?? 30;
+  const maxSceneIndex = beatIndex;
+  const viewedBeat = story?.beats[viewSceneIndex];
+  const viewedScene = sceneCache[viewSceneIndex]?.url ?? null;
 
-  const fetchScene = useCallback(
-    async (prompt: string, seed: number, answerValue?: number) => {
+  const buildScenePayload = useCallback(
+    (index: number, answerValue?: number, choiceLabel?: string) => {
+      if (!story) return null;
+      const b = story.beats[index];
+      if (!b) return null;
+      const val = answerValue ?? responses[b.bfiId];
+      return {
+        scenePrompt: b.scenePrompt,
+        seed: sceneSeedForBeat(b.bfiId, val),
+        answerValue: val,
+        choiceLabel: choiceLabel ?? choiceLabelForBeat(b, val),
+        beatIndex: index,
+        totalBeats: story.beats.length,
+        chapter: b.chapter,
+        chapterTitle: b.chapterTitle,
+        narrative: b.narrative,
+        setting: story.setting,
+        heroName: story.heroName,
+      };
+    },
+    [story, responses]
+  );
+
+  const fetchSceneForBeat = useCallback(
+    async (index: number, answerValue?: number, choiceLabel?: string, animate = true) => {
+      const payload = buildScenePayload(index, answerValue, choiceLabel);
+      if (!payload) return;
+
+      setSceneAnimating(animate);
       try {
         const data = await apiFetch("/personality/story/scene", {
           method: "POST",
-          body: JSON.stringify({ scenePrompt: prompt, seed, answerValue }),
+          body: JSON.stringify(payload),
         });
-        setSceneUrl(data.imageUrl);
-        setSceneSeed(seed);
+        setSceneCache((prev) => ({
+          ...prev,
+          [index]: { url: data.imageUrl, seed: payload.seed },
+        }));
       } catch {
-        /* keep previous scene */
+        /* keep previous */
       }
     },
-    []
+    [buildScenePayload]
   );
 
   const fetchPreview = useCallback(
@@ -90,24 +137,32 @@ export default function PersonalityOnboarding() {
       .then((data: StoryJourney) => {
         setStory(data);
         setPhase("prologue");
-        const first = data.beats[0];
-        if (first) {
-          fetchScene(first.scenePrompt, first.bfiId * 97, undefined);
-          fetchPreview({}, 0, data.beats);
-        }
       })
       .catch(() => setPhase("prologue"));
-  }, [fetchScene, fetchPreview]);
+  }, []);
+
+  useEffect(() => {
+    if (!story || phase !== "story") return;
+    fetchSceneForBeat(beatIndex, responses[story.beats[beatIndex]?.bfiId], undefined, beatIndex === viewSceneIndex);
+    fetchPreview(responses, beatIndex, story.beats);
+  }, [story, phase, beatIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!story) return;
+    setSelectedValue(responses[story.beats[beatIndex]?.bfiId] ?? null);
+    setReadyToAdvance(responses[story.beats[beatIndex]?.bfiId] !== undefined);
+    setViewSceneIndex(beatIndex);
+  }, [beatIndex, story]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectChoice(value: number) {
     if (!beat || !story || readyToAdvance) return;
     setSelectedValue(value);
+    const choiceLabel = beat.choices.find((c) => c.value === value)?.label;
     const nextResponses = { ...responses, [beat.bfiId]: value };
     setResponses(nextResponses);
     setReadyToAdvance(false);
 
-    const seed = beat.bfiId * 97 + value * 13;
-    fetchScene(beat.scenePrompt, seed, value);
+    fetchSceneForBeat(beatIndex, value, choiceLabel, true);
     fetchPreview(nextResponses, beatIndex, story.beats);
 
     setTimeout(() => setReadyToAdvance(true), 1200);
@@ -117,12 +172,31 @@ export default function PersonalityOnboarding() {
     if (beatIndex === 0 || !story) return;
     const prev = beatIndex - 1;
     setBeatIndex(prev);
-    setSelectedValue(responses[story.beats[prev]!.bfiId] ?? null);
-    setReadyToAdvance(!!responses[story.beats[prev]!.bfiId]);
+    setViewSceneIndex(prev);
+    setSceneAnimating(false);
     const b = story.beats[prev]!;
     const val = responses[b.bfiId];
-    fetchScene(b.scenePrompt, b.bfiId * 97 + (val ?? 0) * 13, val);
+    if (!sceneCache[prev]) {
+      fetchSceneForBeat(prev, val, choiceLabelForBeat(b, val), false);
+    }
     fetchPreview(responses, prev, story.beats);
+  }
+
+  function browseScenePrev() {
+    if (viewSceneIndex <= 0) return;
+    setSceneAnimating(false);
+    setViewSceneIndex(viewSceneIndex - 1);
+  }
+
+  function browseSceneNext() {
+    if (viewSceneIndex >= maxSceneIndex) return;
+    const next = viewSceneIndex + 1;
+    setSceneAnimating(false);
+    setViewSceneIndex(next);
+    if (story && !sceneCache[next]) {
+      const b = story.beats[next]!;
+      fetchSceneForBeat(next, responses[b.bfiId], choiceLabelForBeat(b, responses[b.bfiId]), false);
+    }
   }
 
   async function advance() {
@@ -131,11 +205,11 @@ export default function PersonalityOnboarding() {
     if (beatIndex < totalBeats - 1) {
       const next = beatIndex + 1;
       setBeatIndex(next);
+      setViewSceneIndex(next);
+      setSceneAnimating(true);
       const nextBeat = story.beats[next]!;
-      setSelectedValue(responses[nextBeat.bfiId] ?? null);
-      setReadyToAdvance(!!responses[nextBeat.bfiId]);
       const val = responses[nextBeat.bfiId];
-      fetchScene(nextBeat.scenePrompt, nextBeat.bfiId * 97 + (val ?? 0) * 13, val);
+      fetchSceneForBeat(next, val, choiceLabelForBeat(nextBeat, val), true);
       fetchPreview(responses, next, story.beats);
       return;
     }
@@ -201,7 +275,14 @@ export default function PersonalityOnboarding() {
             transition={{ delay: 0.7 }}
             className="mt-10 space-y-3"
           >
-            <Button onClick={() => setPhase("story")} className="w-full sm:w-auto">
+            <Button
+              onClick={() => {
+                setPhase("story");
+                fetchSceneForBeat(0, undefined, undefined, true);
+                fetchPreview({}, 0, story.beats);
+              }}
+              className="w-full sm:w-auto"
+            >
               <Feather size={16} className="mr-2" />
               Begin the first chapter
             </Button>
@@ -237,6 +318,8 @@ export default function PersonalityOnboarding() {
   }
 
   const storyProgress = ((beatIndex + 1) / totalBeats) * 100;
+  const displayBeat = viewedBeat ?? beat;
+  const isBrowsingPast = viewSceneIndex !== beatIndex;
 
   return (
     <div className="relative min-h-screen px-4 py-6 safe-top safe-bottom sm:py-8">
@@ -246,10 +329,10 @@ export default function PersonalityOnboarding() {
         <header className="mb-6">
           <div className="mb-2 flex items-center justify-between text-xs text-ely-muted">
             <span className="uppercase tracking-[0.2em]">
-              Chapter {beat.chapter} · {beat.chapterTitle}
+              Chapter {displayBeat.chapter} · {displayBeat.chapterTitle}
             </span>
             <span>
-              {beatIndex + 1} / {totalBeats}
+              Question {beatIndex + 1} / {totalBeats}
             </span>
           </div>
           <div className="h-1 overflow-hidden rounded-full bg-white/5">
@@ -264,9 +347,20 @@ export default function PersonalityOnboarding() {
         <div className="grid gap-6 lg:grid-cols-[1fr_220px] lg:gap-8">
           <div className="space-y-6">
             <PencilScene
-              imageUrl={sceneUrl}
-              beatKey={`${beat.id}-${sceneSeed}-${selectedValue ?? "x"}`}
+              imageUrl={viewedScene}
+              beatKey={`scene-${viewSceneIndex}-${sceneCache[viewSceneIndex]?.seed ?? "pending"}`}
+              sceneIndex={viewSceneIndex}
+              maxSceneIndex={maxSceneIndex}
+              onPrev={browseScenePrev}
+              onNext={browseSceneNext}
+              animate={sceneAnimating && viewSceneIndex === beatIndex}
             />
+
+            {isBrowsingPast && (
+              <p className="text-center text-xs text-ely-muted">
+                Viewing moment {viewSceneIndex + 1} — use arrows to flip through your story so far
+              </p>
+            )}
 
             <AnimatePresence mode="wait">
               <motion.div

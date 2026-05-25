@@ -1,101 +1,281 @@
 import type { TraitScores } from "./bfi2.js";
 
+export type StorySceneInput = {
+  beatIndex: number;
+  totalBeats: number;
+  chapter: number;
+  chapterTitle: string;
+  narrative: string;
+  setting: string;
+  heroName: string;
+  scenePrompt: string;
+  answerValue?: number;
+  choiceLabel?: string;
+  seed: number;
+};
+
 function hashSeed(seed: number): number {
   return (seed * 2654435761) >>> 0;
 }
 
-/** SVG pencil-sketch style scene — no external API required */
-export function generateSketchSceneSvg(scenePrompt: string, seed: number): string {
-  const hash = hashSeed(seed);
-  const hue = hash % 360;
-  const lines = 14 + (hash % 10);
-  const moodBoost = scenePrompt.includes("bold") ? 0.15 : scenePrompt.includes("shadow") ? -0.1 : 0;
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-  const elements: string[] = [];
-  for (let i = 0; i < lines; i++) {
-    const y = 30 + i * 16 + (hash % 24);
-    const x1 = 20 + (i * 19) % 50;
-    const x2 = 380 - (i * 11) % 60;
-    elements.push(
-      `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y + (i % 4) * 3}" stroke="rgba(255,255,255,${0.06 + (i % 6) * 0.035 + moodBoost})" stroke-width="${0.4 + (i % 3) * 0.25}"/>`
+function truncate(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
+}
+
+type SettingKind = "coastal" | "library" | "garden" | "train" | "city" | "generic";
+
+function detectSetting(setting: string): SettingKind {
+  const s = setting.toLowerCase();
+  if (/coast|harbor|lantern|shore|sea|tide/.test(s)) return "coastal";
+  if (/library|book|ink|archive|shelf/.test(s)) return "library";
+  if (/garden|cloud|float|bloom|petal/.test(s)) return "garden";
+  if (/train|rail|track|station|star/.test(s)) return "train";
+  if (/city|street|dream|window|alley/.test(s)) return "city";
+  return "generic";
+}
+
+type StoryElement =
+  | "threshold"
+  | "path"
+  | "stranger"
+  | "mirror"
+  | "storm"
+  | "light"
+  | "crossroads"
+  | "door"
+  | "water"
+  | "gathering"
+  | "desk"
+  | "bridge";
+
+function detectElements(narrative: string, scenePrompt: string, chapterTitle: string): StoryElement[] {
+  const text = `${narrative} ${scenePrompt} ${chapterTitle}`.toLowerCase();
+  const found: StoryElement[] = [];
+  const rules: [StoryElement, RegExp][] = [
+    ["threshold", /\b(threshold|beginning|first step|awakening|entrance)\b/],
+    ["door", /\b(door|gate|portal|archway|opening)\b/],
+    ["stranger", /\b(stranger|traveler|another|companion|crowd|gathering|market|voices|people)\b/],
+    ["mirror", /\b(mirror|reflection|pool|echo|inner)\b/],
+    ["storm", /\b(storm|dark|rain|tighten|shadow|uncertain|mist)\b/],
+    ["light", /\b(light|lantern|glow|dawn|bright|radiant|sun|star)\b/],
+    ["crossroads", /\b(crossroad|fork|choice|split|path twists|decide)\b/],
+    ["water", /\b(lake|water|wave|coast|river|shore|tide)\b/],
+    ["gathering", /\b(market|crowd|room|festival|together)\b/],
+    ["desk", /\b(desk|map|plan|compass|order|task|list)\b/],
+    ["bridge", /\b(bridge|connect|between|share|tea|harmony)\b/],
+    ["path", /\b(road|path|journey|walk|continue|long road)\b/],
+  ];
+  for (const [el, re] of rules) {
+    if (re.test(text)) found.push(el);
+  }
+  if (found.length === 0) found.push("path");
+  return found.slice(0, 4);
+}
+
+function settingBackdrop(kind: SettingKind, progress: number): string {
+  switch (kind) {
+    case "coastal":
+      return `
+        <path d="M0 250 Q80 235 160 248 T320 242 T400 250 L400 320 L0 320 Z" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>
+        <path d="M0 265 Q100 252 200 260 T400 255" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="0.8"/>
+        <path d="M330 120 L350 70 L370 120 L350 95 Z" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        ${progress > 0.15 ? `<circle cx="360" cy="55" r="14" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>` : ""}
+      `;
+    case "library":
+      return `
+        <line x1="30" y1="60" x2="30" y2="270" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+        <line x1="370" y1="60" x2="370" y2="270" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+        ${[0, 1, 2, 3, 4].map((i) => `<line x1="45" y1="${90 + i * 35}" x2="120" y2="${90 + i * 35}" stroke="rgba(255,255,255,0.1)" stroke-width="0.7"/>`).join("")}
+        ${[0, 1, 2, 3, 4].map((i) => `<line x1="280" y1="${85 + i * 35}" x2="355" y2="${85 + i * 35}" stroke="rgba(255,255,255,0.1)" stroke-width="0.7"/>`).join("")}
+        <path d="M160 270 Q200 110 240 270" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+      `;
+    case "garden":
+      return `
+        <ellipse cx="200" cy="300" rx="180" ry="25" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        ${[60, 140, 260, 340].map((x, i) => `<path d="M${x} 280 L${x} ${200 - i * 8} Q${x - 15} ${180 - i * 8} ${x - 25} ${195 - i * 8}" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>`).join("")}
+        <path d="M40 140 Q200 80 360 130" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" stroke-dasharray="4 6"/>
+      `;
+    case "train":
+      return `
+        <line x1="0" y1="258" x2="400" y2="258" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+        ${[40, 120, 200, 280, 360].map((x) => `<line x1="${x}" y1="258" x2="${x - 8}" y2="268" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>`).join("")}
+        ${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<circle cx="${20 + i * 48}" cy="${40 + (i % 3) * 12}" r="1.2" fill="rgba(255,255,255,0.25)"/>`).join("")}
+      `;
+    case "city":
+      return `
+        ${[50, 110, 170, 230, 290, 350].map((x, i) => `<rect x="${x}" y="${150 - (i % 3) * 20}" width="35" height="${120 + (i % 2) * 15}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="0.9"/>`).join("")}
+        ${[65, 125, 245, 305].map((x) => `<rect x="${x + 8}" y="${190}" width="8" height="10" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="0.5"/>`).join("")}
+      `;
+    default:
+      return `
+        <path d="M0 240 Q120 220 240 235 T400 228" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        <circle cx="320" cy="70" r="28" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="0.8"/>
+      `;
+  }
+}
+
+function drawElement(el: StoryElement, heroX: number, hash: number): string {
+  const jitter = (hash % 20) - 10;
+  switch (el) {
+    case "threshold":
+    case "door":
+      return `
+        <path d="M${heroX + 55 + jitter} 270 L${heroX + 55 + jitter} 150 Q${heroX + 85 + jitter} 120 ${heroX + 115 + jitter} 150 L${heroX + 115 + jitter} 270" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.8"/>
+        <circle cx="${heroX + 105 + jitter}" cy="210" r="3" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="0.8"/>
+      `;
+    case "stranger":
+      return `
+        <circle cx="${heroX + 70}" cy="198" r="9" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+        <path d="M${heroX + 70} 207 L${heroX + 70} 248 M${heroX + 70} 218 L${heroX + 58} 235 M${heroX + 70} 218 L${heroX + 82} 232" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="0.9"/>
+      `;
+    case "mirror":
+      return `
+        <ellipse cx="${heroX + 40}" cy="190" rx="22" ry="30" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.2"/>
+        <path d="M${heroX + 28} 175 Q${heroX + 40} 185 ${heroX + 52} 175" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
+      `;
+    case "storm":
+      return `
+        <path d="M${heroX - 30} 90 Q${heroX} 70 ${heroX + 40} 95 T${heroX + 90} 85" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+        <line x1="${heroX + 20}" y1="100" x2="${heroX + 15}" y2="120" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>
+      `;
+    case "light":
+      return `
+        <circle cx="${heroX + 50}" cy="130" r="16" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+        ${[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+          const rad = (deg * Math.PI) / 180;
+          const x2 = heroX + 50 + Math.cos(rad) * 28;
+          const y2 = 130 + Math.sin(rad) * 28;
+          return `<line x1="${heroX + 50}" y1="130" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="rgba(255,255,255,0.12)" stroke-width="0.6"/>`;
+        }).join("")}
+      `;
+    case "crossroads":
+      return `
+        <path d="M${heroX - 40} 270 Q${heroX} 240 ${heroX + 40} 270" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1.2"/>
+        <path d="M${heroX} 270 L${heroX} 230" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+        <path d="M${heroX - 25} 250 L${heroX + 25} 250" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>
+      `;
+    case "water":
+      return `
+        <path d="M${heroX - 50} 275 Q${heroX - 20} 260 ${heroX + 10} 275 T${heroX + 70} 272" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
+      `;
+    case "gathering":
+      return `
+        <circle cx="${heroX + 55}" cy="200" r="7" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="0.8"/>
+        <circle cx="${heroX + 75}" cy="205" r="6" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="0.8"/>
+        <circle cx="${heroX + 90}" cy="198" r="7" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.8"/>
+      `;
+    case "desk":
+      return `
+        <rect x="${heroX + 30}" y="230" width="50" height="6" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="0.9"/>
+        <line x1="${heroX + 38}" y1="236" x2="${heroX + 38}" y2="255" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
+        <line x1="${heroX + 70}" y1="236" x2="${heroX + 70}" y2="255" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
+        <rect x="${heroX + 42}" y="218" width="22" height="14" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.7"/>
+      `;
+    case "bridge":
+      return `
+        <path d="M${heroX - 20} 255 Q${heroX + 30} 225 ${heroX + 80} 255" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.3"/>
+        <line x1="${heroX - 5}" y1="250" x2="${heroX - 5}" y2="270" stroke="rgba(255,255,255,0.12)" stroke-width="0.6"/>
+        <line x1="${heroX + 35}" y1="238" x2="${heroX + 35}" y2="270" stroke="rgba(255,255,255,0.12)" stroke-width="0.6"/>
+      `;
+    case "path":
+    default:
+      return `
+        <path d="M40 272 Q${heroX} 248 ${Math.min(heroX + 80, 360)} 268" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.2"/>
+      `;
+  }
+}
+
+function drawHero(heroX: number, heroName: string, answerValue?: number): string {
+  const mood = answerValue ?? 3;
+  const stride = mood >= 4 ? 4 : mood <= 2 ? -2 : 0;
+  const headY = 188 + stride;
+  return `
+    <g opacity="0.9">
+      <circle cx="${heroX}" cy="${headY}" r="10" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.2"/>
+      <path d="M${heroX} ${headY + 10} L${heroX} ${headY + 42}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.4"/>
+      <path d="M${heroX} ${headY + 22} L${heroX - 14} ${headY + 34} M${heroX} ${headY + 22} L${heroX + 14} ${headY + 34}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.1"/>
+      <path d="M${heroX} ${headY + 42} L${heroX - 10 + stride} ${headY + 58} M${heroX} ${headY + 42} L${heroX + 10 - stride} ${headY + 58}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.1"/>
+      <path d="M${heroX - 8} ${headY - 2} Q${heroX} ${headY - 14} ${heroX + 8} ${headY - 2}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.8"/>
+    </g>
+    <text x="${heroX}" y="${headY + 78}" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="9" font-family="Georgia, serif">${escapeXml(heroName.slice(0, 12))}</text>
+  `;
+}
+
+function crosshatch(count: number, hash: number, opacity: number): string {
+  const lines: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const y = 24 + i * 14 + (hash % 16);
+    lines.push(
+      `<line x1="16" y1="${y}" x2="384" y2="${y + (i % 3) * 2}" stroke="rgba(255,255,255,${opacity + (i % 4) * 0.012})" stroke-width="0.45"/>`
     );
   }
+  return lines.join("");
+}
 
-  for (let i = 0; i < 8; i++) {
-    const x = 40 + i * 42 + (hash % 20);
-    elements.push(
-      `<line x1="${x}" y1="20" x2="${x - 20}" y2="300" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"/>`
-    );
-  }
+/** Story-continuous pencil sketch — each frame advances the same journey */
+export function generateStorySceneSvg(input: StorySceneInput): string {
+  const hash = hashSeed(input.seed);
+  const progress = input.totalBeats > 1 ? input.beatIndex / (input.totalBeats - 1) : 0;
+  const heroX = 70 + progress * 240;
+  const settingKind = detectSetting(input.setting);
+  const elements = detectElements(input.narrative, input.scenePrompt, input.chapterTitle);
 
-  const keywords = scenePrompt.toLowerCase();
-  let motif = "path";
-  if (keywords.includes("library") || keywords.includes("book") || keywords.includes("arch")) motif = "arch";
-  else if (keywords.includes("garden") || keywords.includes("tree")) motif = "tree";
-  else if (keywords.includes("lake") || keywords.includes("water") || keywords.includes("waves")) motif = "waves";
-  else if (keywords.includes("market") || keywords.includes("crowd") || keywords.includes("figures")) motif = "figures";
-  else if (keywords.includes("train") || keywords.includes("road")) motif = "train";
-  else if (keywords.includes("mist") || keywords.includes("fog")) motif = "mist";
+  const mood = input.answerValue ?? 3;
+  const moodShift = (mood - 3) * 0.04;
+  const hue = (220 + input.chapter * 8 + hash % 30) % 360;
 
-  let motifSvg = "";
-  if (motif === "arch") {
-    motifSvg = `
-      <path d="M90 270 Q200 90 310 270" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="2"/>
-      <path d="M120 270 L120 180 M280 270 L280 180" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
-      <line x1="140" y1="200" x2="260" y2="200" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>
-    `;
-  } else if (motif === "tree") {
-    motifSvg = `
-      <path d="M200 280 L200 130" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
-      <path d="M200 150 Q150 190 130 170 M200 150 Q250 190 270 170 M200 130 Q170 110 160 95 M200 130 Q230 110 240 95" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.2"/>
-      <ellipse cx="200" cy="280" rx="40" ry="8" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-    `;
-  } else if (motif === "waves") {
-    motifSvg = `
-      <path d="M60 230 Q100 210 140 230 T220 230 T300 230" fill="none" stroke="rgba(255,255,255,0.32)" stroke-width="1.3"/>
-      <path d="M80 250 Q120 235 160 250 T240 250" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-      <circle cx="320" cy="80" r="22" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-    `;
-  } else if (motif === "figures") {
-    motifSvg = `
-      <circle cx="150" cy="190" r="14" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.2"/>
-      <path d="M150 204 L150 250 M150 220 L130 240 M150 220 L170 240" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1"/>
-      <circle cx="250" cy="200" r="12" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
-      <path d="M250 212 L250 255 M250 225 L235 245 M250 225 L265 242" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
-    `;
-  } else if (motif === "train") {
-    motifSvg = `
-      <rect x="80" y="210" width="240" height="50" rx="6" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
-      <line x1="130" y1="210" x2="130" y2="260" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-      <line x1="200" y1="210" x2="200" y2="260" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-      <line x1="270" y1="210" x2="270" y2="260" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-      <path d="M60 240 L80 240 M320 240 L340 240" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
-    `;
-  } else if (motif === "mist") {
-    motifSvg = `
-      <path d="M40 180 Q120 160 200 180 T360 180" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
-      <path d="M60 210 Q140 195 220 210 T380 205" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
-    `;
-  } else {
-    motifSvg = `
-      <path d="M90 280 L200 120 L310 280" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.8"/>
-      <path d="M130 280 L200 160 L270 280" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-    `;
-  }
+  const backdrop = settingBackdrop(settingKind, progress);
+  const storyProps = elements.map((el) => drawElement(el, heroX, hash + el.length * 17)).join("");
+  const hero = drawHero(heroX, input.heroName, input.answerValue);
+
+  const chapterLabel = `Ch. ${input.chapter} — ${input.chapterTitle}`;
+  const caption = truncate(input.narrative, 110);
+  const choiceNote = input.choiceLabel ? truncate(input.choiceLabel, 72) : "";
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 320" width="400" height="320">
     <defs>
-      <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="5" result="n"/><feDiffuseLighting in="n" lighting-color="#14141f" surfaceScale="1.2"><feDistantLight azimuth="45" elevation="55"/></feDiffuseLighting></filter>
-      <radialGradient id="g" cx="50%" cy="38%"><stop offset="0%" stop-color="hsla(${hue},35%,${32 + moodBoost * 100}%,0.55)"/><stop offset="100%" stop-color="hsla(${hue},25%,8%,0.95)"/></radialGradient>
+      <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="4" result="n"/><feDiffuseLighting in="n" lighting-color="#12121a" surfaceScale="1"><feDistantLight azimuth="50" elevation="58"/></feDiffuseLighting></filter>
+      <radialGradient id="sky" cx="${30 + progress * 40}%" cy="30%"><stop offset="0%" stop-color="hsla(${hue},30%,${38 + moodShift * 100}%,0.5)"/><stop offset="100%" stop-color="hsla(${hue},20%,8%,0.96)"/></radialGradient>
     </defs>
-    <rect width="400" height="320" fill="url(#g)"/>
-    ${elements.join("")}
-    ${motifSvg}
-    <rect width="400" height="320" fill="url(#paper)" opacity="0.18"/>
-    <rect width="400" height="320" fill="rgba(10,10,15,0.08)"/>
+    <rect width="400" height="320" fill="url(#sky)"/>
+    ${crosshatch(12, hash, 0.05)}
+    ${backdrop}
+    ${storyProps}
+    ${hero}
+    ${crosshatch(6, hash + 99, 0.03)}
+    <rect x="0" y="248" width="400" height="72" fill="rgba(8,8,12,0.72)"/>
+    <line x1="20" y1="248" x2="380" y2="248" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+    <text x="20" y="266" fill="rgba(255,255,255,0.45)" font-size="8" font-family="Georgia, serif" letter-spacing="0.08em">${escapeXml(chapterLabel.toUpperCase())}</text>
+    <text x="20" y="284" fill="rgba(255,255,255,0.78)" font-size="11" font-family="Georgia, serif">${escapeXml(caption)}</text>
+    ${choiceNote ? `<text x="20" y="302" fill="rgba(167,139,250,0.85)" font-size="9" font-family="Georgia, serif" font-style="italic">${escapeXml(`You chose: ${choiceNote}`)}</text>` : `<text x="20" y="302" fill="rgba(255,255,255,0.3)" font-size="9" font-family="Georgia, serif">Moment ${input.beatIndex + 1} of ${input.totalBeats}</text>`}
+    <rect width="400" height="320" fill="url(#paper)" opacity="0.14"/>
   </svg>`;
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/** @deprecated Use generateStorySceneSvg — kept for compatibility */
+export function generateSketchSceneSvg(scenePrompt: string, seed: number): string {
+  return generateStorySceneSvg({
+    beatIndex: seed % 30,
+    totalBeats: 30,
+    chapter: 1,
+    chapterTitle: "The Journey",
+    narrative: scenePrompt,
+    setting: scenePrompt,
+    heroName: "Traveler",
+    scenePrompt,
+    seed,
+  });
 }
 
 export function generateAvatarSilhouetteSvg(

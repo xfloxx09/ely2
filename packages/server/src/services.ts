@@ -46,6 +46,7 @@ import { enrollAffiliate, getNextRankProgress } from "@ely/mlm";
 import { awardXp, updateStreak, completeQuest, checkAndAwardBadges, getDailyQuests } from "@ely/gamification";
 import { generateReferralCode } from "@ely/mlm";
 import { getAppUrl } from "./session.js";
+import { getPlatformConfig } from "./platform-config.js";
 
 export async function registerUser(email: string, password: string, name?: string, referralCode?: string) {
   const db = getDb();
@@ -179,7 +180,8 @@ export async function generateUserAvatar(userId: string, scores?: { openness: nu
   }
 
   const params = mapTraitsToAvatarParams(scores);
-  let imageUrl = await generateAvatarImage(params.prompt);
+  const platformConfig = await getPlatformConfig();
+  let imageUrl = await generateAvatarImage(params.prompt, platformConfig.replicateApiToken ?? undefined);
   if (!imageUrl) {
     imageUrl = getPlaceholderAvatarUrl(params);
   }

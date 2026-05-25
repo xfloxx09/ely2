@@ -604,6 +604,14 @@ export const personalityMirrorReports = pgTable("personality_mirror_reports", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const platformSettings = pgTable("platform_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  isSecret: boolean("is_secret").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedById: uuid("updated_by_id").references(() => users.id),
+});
+
 export const spendingEntries = pgTable("spending_entries", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
