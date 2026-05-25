@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { Send, Sparkles } from "lucide-react";
+import { Send } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { ChatAvatarPresence } from "@/components/chat/ChatAvatarPresence";
+import { ChatAvatarFace, ChatAvatarPresence } from "@/components/chat/ChatAvatarPresence";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getWsUrl, apiFetch } from "@/lib/utils";
 import { inferAvatarEmotion, type AvatarEmotion } from "@ely/personality";
@@ -22,10 +22,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
-  const [avatarState, setAvatarState] = useState("idle");
   const [emotion, setEmotion] = useState<AvatarEmotion>("idle");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [heroName, setHeroName] = useState("ELY");
   const [sending, setSending] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const useHttpRef = useRef(false);
@@ -33,7 +31,6 @@ export default function ChatPage() {
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("ely_user") || "{}");
-    if (user.name) setHeroName(user.name.split(" ")[0] || "ELY");
 
     apiFetch("/avatar")
       .then((data) => {
@@ -81,20 +78,17 @@ export default function ChatPage() {
     socket.on("done", ({ content }: { content: string }) => {
       setMessages((prev) => [...prev, { role: "ASSISTANT", content }]);
       setStreaming("");
-      setAvatarState("idle");
       setEmotion(inferAvatarEmotion(content));
       setSending(false);
     });
 
     socket.on("avatar_state", ({ state }: { state: string }) => {
-      setAvatarState(state);
       if (state === "thinking") setEmotion("thinking");
       if (state === "listening") setEmotion("listening");
     });
 
     socket.on("error", () => {
       setSending(false);
-      setAvatarState("idle");
       setEmotion("idle");
     });
 
@@ -108,7 +102,6 @@ export default function ChatPage() {
   }, [messages, streaming]);
 
   async function sendViaHttp(content: string) {
-    setAvatarState("thinking");
     setEmotion("thinking");
     setSending(true);
     try {
@@ -125,7 +118,6 @@ export default function ChatPage() {
       ]);
       setEmotion("concerned");
     } finally {
-      setAvatarState("idle");
       setSending(false);
     }
   }
@@ -145,86 +137,101 @@ export default function ChatPage() {
     }
 
     setSending(true);
-    setAvatarState("thinking");
     setEmotion("thinking");
     socketRef.current.emit("message", { content });
   }
 
+  function ElyMessageBubble({ content, streamingText }: { content: string; streamingText?: boolean }) {
+    return (
+      <div className="flex justify-start">
+        <div className="flex max-w-[88%] gap-2.5">
+          <ChatAvatarFace imageUrl={avatarUrl} name="ELY" emotion={emotion} size="sm" />
+          <div className="min-w-0">
+            <p className="mb-1 text-xs font-medium text-ely-accent">ELY</p>
+            <div className="glass rounded-2xl rounded-bl-md px-4 py-3 text-sm leading-relaxed">
+              {content}
+              {streamingText && <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-ely-primary" />}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <AppShell>
-      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-6xl flex-col md:h-[calc(100vh-2rem)] md:flex-row md:gap-6 md:p-4">
-        <aside className="flex shrink-0 items-center justify-center border-b border-ely-border bg-[#0c0c12]/80 px-4 py-5 md:w-56 md:flex-col md:border-b-0 md:border-r md:py-8 lg:w-64">
-          <ChatAvatarPresence imageUrl={avatarUrl} name={heroName} emotion={emotion} />
-        </aside>
+      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-3xl flex-col md:h-[calc(100vh-2rem)]">
+        <header className="border-b border-ely-border px-4 py-3">
+          <ChatAvatarPresence
+            imageUrl={avatarUrl}
+            name="ELY"
+            emotion={emotion}
+            compact
+          />
+        </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex gap-2 overflow-x-auto px-4 py-2">
-            {MODULES.map((m) => (
-              <button
-                key={m}
-                onClick={() => setInput(`Help me with ${m.toLowerCase()}: `)}
-                className="min-h-[32px] whitespace-nowrap rounded-full px-3 py-1.5 text-xs glass hover:bg-white/10"
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+        <div className="flex gap-2 overflow-x-auto px-4 py-2">
+          {MODULES.map((m) => (
+            <button
+              key={m}
+              onClick={() => setInput(`Help me with ${m.toLowerCase()}: `)}
+              className="min-h-[32px] whitespace-nowrap rounded-full px-3 py-1.5 text-xs glass hover:bg-white/10"
+            >
+              {m}
+            </button>
+          ))}
+        </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-            {messages.length === 0 && !streaming && (
-              <div className="py-12 text-center">
-                <Sparkles className="mx-auto mb-4 text-ely-primary" size={32} />
-                <p className="text-ely-muted">Start a conversation with ELY</p>
-                <p className="mt-2 text-xs text-ely-muted">Type or tap the mic · /gpt-4o, /claude, /gemini</p>
-              </div>
-            )}
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "USER" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                    msg.role === "USER" ? "rounded-br-md bg-ely-primary text-white" : "glass rounded-bl-md"
-                  }`}
-                >
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          {messages.length === 0 && !streaming && (
+            <div className="flex flex-col items-center py-10 text-center">
+              <ChatAvatarPresence imageUrl={avatarUrl} name="ELY" emotion={emotion} showEdit={false} />
+              <p className="mt-6 text-ely-muted">Start a conversation with ELY</p>
+              <p className="mt-2 text-xs text-ely-muted">Type or tap the mic · /gpt-4o, /claude, /gemini</p>
+            </div>
+          )}
+
+          {messages.map((msg, i) =>
+            msg.role === "USER" ? (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-ely-primary px-4 py-3 text-sm leading-relaxed text-white">
                   {msg.content}
                 </div>
               </div>
-            ))}
-            {streaming && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-2xl rounded-bl-md px-4 py-3 text-sm glass">
-                  {streaming}
-                  <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-ely-primary" />
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
+            ) : (
+              <ElyMessageBubble key={i} content={msg.content} />
+            )
+          )}
 
-          <div className="safe-bottom border-t border-ely-border p-4">
-            <div className="mx-auto flex max-w-3xl gap-2">
-              <VoiceInputButton
-                onTranscript={(text) => sendMessage(text)}
-                onListeningChange={(listening) => {
-                  if (listening) setEmotion("listening");
-                }}
-                disabled={sending}
-              />
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
-                placeholder="Message ELY..."
-                className="min-h-[44px] flex-1 rounded-full border border-ely-border bg-ely-card px-4 py-3 text-sm outline-none focus:border-ely-primary"
-                disabled={sending}
-              />
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || sending}
-                className="flex h-11 min-h-[44px] min-w-[44px] w-11 items-center justify-center rounded-full bg-ely-primary disabled:opacity-50"
-              >
-                <Send size={18} />
-              </button>
-            </div>
+          {streaming && <ElyMessageBubble content={streaming} streamingText />}
+
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="safe-bottom border-t border-ely-border p-4">
+          <div className="flex gap-2">
+            <VoiceInputButton
+              onTranscript={(text) => sendMessage(text)}
+              onListeningChange={(listening) => {
+                if (listening) setEmotion("listening");
+              }}
+              disabled={sending}
+            />
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
+              placeholder="Message ELY..."
+              className="min-h-[44px] flex-1 rounded-full border border-ely-border bg-ely-card px-4 py-3 text-sm outline-none focus:border-ely-primary"
+              disabled={sending}
+            />
+            <button
+              onClick={() => sendMessage()}
+              disabled={!input.trim() || sending}
+              className="flex h-11 min-h-[44px] min-w-[44px] w-11 items-center justify-center rounded-full bg-ely-primary disabled:opacity-50"
+            >
+              <Send size={18} />
+            </button>
           </div>
         </div>
       </div>
