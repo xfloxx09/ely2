@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { apiFetch } from "@/lib/utils";
-import { MessageCircle, Sparkles, Trophy, Flame, X, Send } from "lucide-react";
+import { MessageCircle, Sparkles, Trophy, Flame, X, Send, Users } from "lucide-react";
 import { Button } from "@/components/ui";
+import { GroupCreateModal } from "@/components/conversations/GroupCreateModal";
 
 type CommunityUser = {
   id: string;
@@ -42,6 +43,7 @@ export default function CommunityPage() {
   const [exchanges, setExchanges] = useState(4);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGroupModal, setShowGroupModal] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -114,9 +116,14 @@ export default function CommunityPage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-6xl px-4 py-6 safe-top">
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Community</h1>
-          <p className="mt-1 text-sm text-ely-muted">Meet travelers, climb the boards, start conversations</p>
+        <header className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Community</h1>
+            <p className="mt-1 text-sm text-ely-muted">Meet travelers, climb the boards, start conversations</p>
+          </div>
+          <Button variant="secondary" className="shrink-0 gap-2" onClick={() => setShowGroupModal(true)}>
+            <Users size={16} /> Group chat
+          </Button>
         </header>
 
         {leaderboard && (
@@ -290,6 +297,8 @@ export default function CommunityPage() {
           </div>
         </div>
       )}
+
+      {showGroupModal && <GroupCreateModal onClose={() => setShowGroupModal(false)} />}
     </AppShell>
   );
 }

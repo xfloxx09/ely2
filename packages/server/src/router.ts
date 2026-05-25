@@ -56,6 +56,18 @@ import {
   getConversationInbox,
   getUnreadConversationCount,
   markConversationRead,
+  archiveConversation,
+  unarchiveConversation,
+  deleteConversationForUser,
+  setConversationFolder,
+  listConversationFolders,
+  createConversationFolder,
+  updateConversationFolder,
+  deleteConversationFolder,
+  exportConversationTxt,
+  startGroupDirectMessage,
+  addGroupParticipants,
+  startGroupAiPersonaBattle,
 } from "./social-service.js";
 
 type ApiRequest = {
@@ -72,6 +84,22 @@ const PUBLIC_PATHS = [
   "/personality/questions",
   "/legal/income-disclosure",
 ];
+
+function pathOnly(fullPath: string): string {
+  return fullPath.split("?")[0] || fullPath;
+}
+
+function queryParams(fullPath: string): URLSearchParams {
+  const q = fullPath.includes("?") ? fullPath.slice(fullPath.indexOf("?") + 1) : "";
+  return new URLSearchParams(q);
+}
+
+function parseConversationPath(fullPath: string): { id: string; action: string | null } | null {
+  const base = pathOnly(fullPath);
+  const m = base.match(/^\/community\/conversation\/([^/]+)(?:\/(.+))?$/);
+  if (!m) return null;
+  return { id: m[1]!, action: m[2] || null };
+}
 
 export async function handleApiRequest(req: ApiRequest): Promise<{ status: number; body: unknown }> {
   const { method, path, body, authHeader } = req;
@@ -249,11 +277,35 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       return { status: 200, body: { conversations: await listMySocialConversations(userId!) } };
     }
 
-    if (method === "GET" && path === "/conversations/inbox") {
-      return { status: 200, body: await getConversationInbox(userId!) };
+    if (method === "GET" && pathOnly(path) === "/conversations/inbox") {
+      const q = queryParams(path);
+      const view = q.get("view") === "archived" ? "archived" : "active";
+      const folderParam = q.get("folderId");
+      const folderId = folderParam === "none" ? null : folderParam || undefined;
+      return { status: 200, body: await getConversationInbox(userId!, { view, folderId }) };
     }
 
-    if (method === "GET" && path === "/conversations/unread-count") {
+    if (method === "GET" && pathOnly(path) === "/conversations/folders") {
+      return { status: 200, body: { folders: await listConversationFolders(userId!) } };
+    }
+
+    if (method === "POST" && pathOnly(path) === "/conversations/folders") {
+      const { name, kind } = body as { name: string; kind: "real" | "avatar" };
+      return { status: 200, body: await createConversationFolder(userId!, name, kind) };
+    }
+
+    if (method === "POST" && pathOnly(path).match(/^\/conversations\/folders\/[^/]+\/rename$/)) {
+      const folderId = pathOnly(path).replace("/conversations/folders/", "").replace("/rename", "");
+      const { name } = body as { name: string };
+      return { status: 200, body: await updateConversationFolder(userId!, folderId, name) };
+    }
+
+    if (method === "DELETE" && pathOnly(path).startsWith("/conversations/folders/")) {
+      const folderId = pathOnly(path).replace("/conversations/folders/", "");
+      return { status: 200, body: await deleteConversationFolder(userId!, folderId) };
+    }
+
+    if (method === "GET" && pathOnly(path) === "/conversations/unread-count") {
       const count = await getUnreadConversationCount(userId!);
       return { status: 200, body: { count } };
     }
@@ -261,6 +313,27 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
     if (method === "POST" && path === "/community/dm") {
       const { recipientId } = body as { recipientId: string };
       const result = await startDirectMessage(userId!, recipientId);
+      return { status: 200, body: result };
+    }
+
+    if (method === "POST" && pathOnly(path) === "/community/group-dm") {
+      const { participantIds, title } = body as { participantIds: string[]; title?: string };
+      const result = await startGroupDirectMessage(userId!, participantIds, title);
+      return { status: 200, body: result };
+    }
+
+    if (method === "POST" && pathOnly(path) === "/community/group-ai-battle") {
+      const { participantIds, topic, exchanges } = body as {
+        participantIds: string[];
+        topic: string;
+        exchanges: number;
+      };
+      const result = await startGroupAiPersonaBattle({
+        initiatorId: userId!,
+        participantIds,
+        topic,
+        exchanges: exchanges ?? 4,
+      });
       return { status: 200, body: result };
     }
 
@@ -279,21 +352,49 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       return { status: 200, body: result };
     }
 
-    if (method === "GET" && path.startsWith("/community/conversation/")) {
-      const convId = path.replace("/community/conversation/", "");
-      return { status: 200, body: await getSocialConversation(convId, userId!) };
-    }
+    const convPath = parseConversationPath(path);
+    if (convPath) {
+      const { id: convId, action } = convPath;
 
-    if (method === "POST" && path.startsWith("/community/conversation/") && path.endsWith("/read")) {
-      const convId = path.replace("/community/conversation/", "").replace("/read", "");
-      return { status: 200, body: await markConversationRead(convId, userId!) };
-    }
+      if (method === "GET" && action === "export") {
+        return { status: 200, body: await exportConversationTxt(convId, userId!) };
+      }
 
-    if (method === "POST" && path.startsWith("/community/conversation/") && path.endsWith("/message")) {
-      const convId = path.replace("/community/conversation/", "").replace("/message", "");
-      const { content } = body as { content: string };
-      const message = await sendDirectMessage(convId, userId!, content);
-      return { status: 200, body: { message } };
+      if (method === "POST" && action === "archive") {
+        return { status: 200, body: await archiveConversation(convId, userId!) };
+      }
+
+      if (method === "POST" && action === "unarchive") {
+        return { status: 200, body: await unarchiveConversation(convId, userId!) };
+      }
+
+      if (method === "DELETE" && !action) {
+        return { status: 200, body: await deleteConversationForUser(convId, userId!) };
+      }
+
+      if (method === "POST" && action === "folder") {
+        const { folderId } = body as { folderId: string | null };
+        return { status: 200, body: await setConversationFolder(convId, userId!, folderId ?? null) };
+      }
+
+      if (method === "POST" && action === "participants") {
+        const { participantIds } = body as { participantIds: string[] };
+        return { status: 200, body: await addGroupParticipants(convId, userId!, participantIds) };
+      }
+
+      if (method === "GET" && !action) {
+        return { status: 200, body: await getSocialConversation(convId, userId!) };
+      }
+
+      if (method === "POST" && action === "read") {
+        return { status: 200, body: await markConversationRead(convId, userId!) };
+      }
+
+      if (method === "POST" && action === "message") {
+        const { content } = body as { content: string };
+        const message = await sendDirectMessage(convId, userId!, content);
+        return { status: 200, body: { message } };
+      }
     }
 
     if (method === "GET" && path === "/gamification/stats") {

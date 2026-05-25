@@ -74,8 +74,12 @@ export const nexusProviderEnum = pgEnum("nexus_provider", [
 
 export const socialConversationTypeEnum = pgEnum("social_conversation_type", [
   "DIRECT",
+  "GROUP",
   "AI_PERSONA",
+  "GROUP_AI",
 ]);
+
+export const socialFolderKindEnum = pgEnum("social_folder_kind", ["real", "avatar"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -648,6 +652,41 @@ export const socialMessages = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("social_messages_conversation_idx").on(t.conversationId)]
+);
+
+export const socialConversationFolders = pgTable(
+  "social_conversation_folders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: socialFolderKindEnum("kind").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("social_conversation_folders_user_idx").on(t.userId)]
+);
+
+export const socialConversationUserPrefs = pgTable(
+  "social_conversation_user_prefs",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => socialConversations.id, { onDelete: "cascade" }),
+    folderId: uuid("folder_id").references(() => socialConversationFolders.id, { onDelete: "set null" }),
+    archivedAt: timestamp("archived_at"),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.conversationId] }),
+    index("social_conversation_user_prefs_user_idx").on(t.userId),
+    index("social_conversation_user_prefs_conv_idx").on(t.conversationId),
+  ]
 );
 
 export const spendingEntries = pgTable("spending_entries", {

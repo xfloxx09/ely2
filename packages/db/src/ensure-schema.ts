@@ -36,6 +36,27 @@ export async function ensureSocialTables(): Promise<void> {
   `);
 
   await db.execute(sql`
+    DO $$ BEGIN
+      ALTER TYPE "social_conversation_type" ADD VALUE 'GROUP';
+    EXCEPTION WHEN duplicate_object THEN null;
+    END $$;
+  `);
+
+  await db.execute(sql`
+    DO $$ BEGIN
+      ALTER TYPE "social_conversation_type" ADD VALUE 'GROUP_AI';
+    EXCEPTION WHEN duplicate_object THEN null;
+    END $$;
+  `);
+
+  await db.execute(sql`
+    DO $$ BEGIN
+      CREATE TYPE "social_folder_kind" AS ENUM ('real', 'avatar');
+    EXCEPTION WHEN duplicate_object THEN null;
+    END $$;
+  `);
+
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "social_conversations" (
       "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
       "type" "social_conversation_type" NOT NULL,
@@ -57,6 +78,28 @@ export async function ensureSocialTables(): Promise<void> {
       "content" text NOT NULL,
       "metadata" jsonb DEFAULT '{}'::jsonb,
       "created_at" timestamp DEFAULT now() NOT NULL
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "social_conversation_folders" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "name" text NOT NULL,
+      "kind" "social_folder_kind" NOT NULL,
+      "sort_order" integer DEFAULT 0 NOT NULL,
+      "created_at" timestamp DEFAULT now() NOT NULL
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "social_conversation_user_prefs" (
+      "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "conversation_id" uuid NOT NULL REFERENCES "social_conversations"("id") ON DELETE cascade,
+      "folder_id" uuid REFERENCES "social_conversation_folders"("id") ON DELETE set null,
+      "archived_at" timestamp,
+      "deleted_at" timestamp,
+      PRIMARY KEY ("user_id", "conversation_id")
     )
   `);
 
