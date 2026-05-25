@@ -1,5 +1,6 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
+import { geminiGenerateText, resolveLlmProvider } from "./gemini.js";
 
 export type StoryChoice = {
   label: string;
@@ -150,17 +151,20 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
   };
 }
 
+const STORY_SYSTEM_PROMPT = `You create immersive personalized story questionnaires for personality discovery. 
+Return JSON with: title, prologue (2-3 poetic sentences), heroName, setting, beats (array of exactly 30).
+Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, ~3 beats each), chapterTitle, narrative (2 sentences of story prose), question (story-framed, no clinical language), choices (5 options with label and value 1-5 where higher agreement with the trait unless reverseScored), scenePrompt (pencil sketch image description).
+Never mention Big Five or psychology. Make it magical, literary, and unique.`;
+
 export async function generateStoryJourney(
   userId: string,
   userName?: string,
   apiKey?: string
 ): Promise<StoryJourney> {
-  if (!apiKey && !process.env.OPENAI_API_KEY) {
+  const provider = apiKey ? "openai" : resolveLlmProvider();
+  if (!provider) {
     return buildFallbackStory(userId, userName);
   }
-
-  const OpenAI = (await import("openai")).default;
-  const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
 
   const bfiList = BFI2_SHORT.map((q) => ({
     id: q.id,
@@ -169,29 +173,38 @@ export async function generateStoryJourney(
     original: q.text,
   }));
 
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.9,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `You create immersive personalized story questionnaires for personality discovery. 
-Return JSON with: title, prologue (2-3 poetic sentences), heroName, setting, beats (array of exactly 30).
-Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, ~3 beats each), chapterTitle, narrative (2 sentences of story prose), question (story-framed, no clinical language), choices (5 options with label and value 1-5 where higher agreement with the trait unless reverseScored), scenePrompt (pencil sketch image description).
-Never mention Big Five or psychology. Make it magical, literary, and unique.`,
-        },
-        {
-          role: "user",
-          content: `Create a unique story for user "${userName || "Traveler"}" (id seed: ${userId.slice(0, 8)}). 
-Map these 30 personality moments: ${JSON.stringify(bfiList)}`,
-        },
-      ],
-      max_tokens: 8000,
-    });
+  const userPrompt = `Create a unique story for user "${userName || "Traveler"}" (id seed: ${userId.slice(0, 8)}). 
+Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
 
-    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}") as StoryJourney;
+  try {
+    let raw = "";
+
+    if (provider === "gemini") {
+      raw = await geminiGenerateText({
+        system: STORY_SYSTEM_PROMPT,
+        prompt: userPrompt,
+        temperature: 0.9,
+        maxTokens: 8192,
+        json: true,
+        apiKey: apiKey || undefined,
+      });
+    } else {
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.9,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: STORY_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 8000,
+      });
+      raw = response.choices[0]?.message?.content || "";
+    }
+
+    const parsed = JSON.parse(raw || "{}") as StoryJourney;
     if (parsed.beats?.length === 30) {
       return parsed;
     }

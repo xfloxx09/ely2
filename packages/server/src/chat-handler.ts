@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, users, communicationProfiles, userApiKeys, elyCredits } from "@ely/db";
-import { getNeutralProfile } from "@ely/personality";
+import { getNeutralProfile, resolveLlmProvider, getGeminiModel } from "@ely/personality";
 import {
   buildSystemPrompt,
   completeElyCore,
@@ -48,7 +48,7 @@ export async function handleChatMessage(userId: string, content: string) {
 
   const nexusCmd = parseNexusCommand(content);
   let fullResponse = "";
-  let modelUsed = "gpt-4o-mini";
+  let modelUsed = resolveLlmProvider() === "gemini" ? getGeminiModel() : "gpt-4o-mini";
 
   if (nexusCmd && (user.tier === "PLUS" || user.tier === "PRO")) {
     const [apiKeyRow] = await db
@@ -64,9 +64,9 @@ export async function handleChatMessage(userId: string, content: string) {
       const [credits] = await db.select().from(elyCredits).where(eq(elyCredits.userId, userId)).limit(1);
       if (!credits || credits.balance <= 0) throw new Error("No API key or credits available");
       await db.update(elyCredits).set({ balance: credits.balance - 1 }).where(eq(elyCredits.userId, userId));
-      apiKey = process.env.OPENAI_API_KEY;
+      apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
     } else {
-      apiKey = process.env.OPENAI_API_KEY;
+      apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
     }
 
     if (!apiKey) throw new Error("Model Nexus unavailable");

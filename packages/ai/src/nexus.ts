@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import type { CommunicationProfile } from "@ely/personality";
 import { buildSystemPrompt } from "./ely-core.js";
+import { geminiChatCompletion } from "@ely/personality";
 
 function getKey(): Buffer {
   const secret = process.env.API_KEY_ENCRYPTION_KEY || "dev-api-key-change-in-prod-32b";
@@ -61,6 +62,19 @@ export async function callNexusModel(
       });
       const block = response.content[0];
       return block?.type === "text" ? block.text : "";
+    }
+    case "GOOGLE": {
+      return geminiChatCompletion({
+        system: systemPrompt,
+        messages: messages
+          .filter((m) => m.role !== "system")
+          .map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+          })),
+        maxTokens: 4096,
+        apiKey,
+      });
     }
     default:
       throw new Error(`Provider ${provider} not yet supported`);

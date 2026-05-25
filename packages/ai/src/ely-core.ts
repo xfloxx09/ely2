@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { CommunicationProfile } from "@ely/personality";
+import { geminiChatCompletion, resolveLlmProvider } from "@ely/personality";
 
 const ELY_BASE_PROMPT = `You are ELY, a personal AI companion, coach, and concierge. You are warm, capable, and deeply attuned to your user. You help with everyday tasks through natural conversation. You are NOT a therapist — encourage real human connection when appropriate. Be helpful, honest, and respect the user's authentic self.`;
 
@@ -26,6 +27,17 @@ export async function* streamElyCore(
   systemPrompt: string,
   apiKey?: string
 ): AsyncGenerator<string> {
+  const provider = apiKey ? "openai" : resolveLlmProvider();
+  if (provider === "gemini") {
+    const text = await geminiChatCompletion({
+      system: systemPrompt,
+      messages: messages.filter((m) => m.role !== "system") as { role: "user" | "assistant"; content: string }[],
+      apiKey,
+    });
+    yield text;
+    return;
+  }
+
   const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
 
   const stream = await openai.chat.completions.create({
@@ -47,6 +59,15 @@ export async function completeElyCore(
   systemPrompt: string,
   apiKey?: string
 ): Promise<string> {
+  const provider = apiKey ? "openai" : resolveLlmProvider();
+  if (provider === "gemini") {
+    return geminiChatCompletion({
+      system: systemPrompt,
+      messages: messages.filter((m) => m.role !== "system") as { role: "user" | "assistant"; content: string }[],
+      apiKey,
+    });
+  }
+
   const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
 
   const response = await openai.chat.completions.create({
@@ -94,7 +115,7 @@ export function parseNexusCommand(message: string): { model: string; provider: s
     "gpt-4o": { model: "gpt-4o", provider: "OPENAI" },
     "gpt-4": { model: "gpt-4", provider: "OPENAI" },
     claude: { model: "claude-3-5-sonnet-20241022", provider: "ANTHROPIC" },
-    gemini: { model: "gemini-pro", provider: "GOOGLE" },
+    gemini: { model: "gemini-2.0-flash", provider: "GOOGLE" },
     cohere: { model: "command-r-plus", provider: "COHERE" },
   };
 
@@ -109,24 +130,39 @@ export async function extractMemories(
   assistantResponse: string,
   apiKey?: string
 ): Promise<string[]> {
-  const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
+  const system =
+    'Extract key facts about the user from this conversation that would be useful to remember for future interactions. Return JSON as {"memories":["..."]} with max 3 items. Return {"memories":[]} if nothing notable.';
+  const user = `User: ${userMessage}\nAssistant: ${assistantResponse}`;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: "Extract key facts about the user from this conversation that would be useful to remember for future interactions. Return as JSON array of strings, max 3 items. Return [] if nothing notable.",
-      },
-      { role: "user", content: `User: ${userMessage}\nAssistant: ${assistantResponse}` },
-    ],
-    temperature: 0,
-    max_tokens: 256,
-    response_format: { type: "json_object" },
-  });
+  let raw = "";
+  const provider = apiKey ? "openai" : resolveLlmProvider();
+
+  if (provider === "gemini") {
+    raw = await geminiChatCompletion({
+      system,
+      messages: [{ role: "user", content: user }],
+      temperature: 0,
+      maxTokens: 256,
+      json: true,
+      apiKey,
+    });
+  } else {
+    const openai = new OpenAI({ apiKey: apiKey || process.env.OPENAI_API_KEY });
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0,
+      max_tokens: 256,
+      response_format: { type: "json_object" },
+    });
+    raw = response.choices[0]?.message?.content || "{}";
+  }
 
   try {
-    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+    const parsed = JSON.parse(raw || "{}");
     return Array.isArray(parsed.memories) ? parsed.memories : [];
   } catch {
     return [];
