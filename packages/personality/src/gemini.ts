@@ -18,9 +18,25 @@ export function resolveLlmProvider(source?: LlmKeySource): "openai" | "gemini" |
   if (preferred === "gemini" && gemini) return "gemini";
   if (preferred === "openai" && openai) return "openai";
   if (gemini && !openai) return "gemini";
-  if (openai) return "openai";
+  if (openai && !gemini) return "openai";
   if (gemini) return "gemini";
+  if (openai) return "openai";
   return null;
+}
+
+/** Providers to attempt in order when the preferred one fails. */
+export function resolveLlmProviderChain(source?: LlmKeySource): ("openai" | "gemini")[] {
+  const gemini = source?.geminiKey ?? process.env.GEMINI_API_KEY;
+  const openai = source?.openaiKey ?? process.env.OPENAI_API_KEY;
+  const primary = resolveLlmProvider(source);
+  const chain: ("openai" | "gemini")[] = [];
+
+  if (primary === "gemini" && gemini) chain.push("gemini");
+  if (primary === "openai" && openai) chain.push("openai");
+  if (primary !== "gemini" && gemini) chain.push("gemini");
+  if (primary !== "openai" && openai) chain.push("openai");
+
+  return [...new Set(chain)];
 }
 
 export function getGeminiModel(source?: { geminiModel?: string | null }): string {

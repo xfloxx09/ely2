@@ -1,6 +1,6 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
-import { geminiGenerateText, resolveLlmProvider, type LlmKeySource } from "./gemini.js";
+import { geminiGenerateText, resolveLlmProviderChain, type LlmKeySource } from "./gemini.js";
 import { buildContinuousArc } from "./story-arc.js";
 
 export type StoryChoice = {
@@ -32,6 +32,8 @@ export type StoryJourney = {
 export type StoryGenerationDebug = {
   storySource: "gemini" | "openai" | "fallback";
   storyModel?: string;
+  providerResolved?: "gemini" | "openai" | null;
+  storyFailureReason?: string;
 };
 
 const SETTINGS = [
@@ -289,24 +291,148 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
   };
 }
 
-const STORY_SYSTEM_PROMPT = `You create ONE continuous short story split into exactly 30 sequential beats for personality discovery.
-Return JSON with: title, prologue (2-3 sentences setting up the whole arc), heroName, setting, beats (array of exactly 30).
+const STORY_BATCH_SYSTEM_PROMPT = `You continue ONE continuous story for personality discovery. Return JSON only.
+For batch 1 include: title, prologue (2-3 sentences), heroName, setting, beats (exactly 10 items).
+For batches 2-3 include only: beats (exactly 10 items).
 
-STORY CONTINUITY (mandatory):
-- This is a single tale from beat 1 to 30 — a complete hero's journey with beginning, middle, and end
-- Beat 1 opens the adventure; beat 30 resolves at a mirror/reveal where a companion is born
-- Each beat MUST reference what just happened in the previous beat (carry objects, characters, locations forward)
-- Never reset to a random new scene without a story transition
-- Recurring elements: a glowing map that fills with each choice, at least one companion/traveler who returns
+Each beat: id, bfiId, trait, chapter (1-10), chapterTitle, narrative (2 sentences), question, choices (5 with label+value), scenePrompt.
+Choice values must be exactly 5,4,3,2,1 once each. Labels are story actions for THIS beat only.
+Never mention Big Five or psychology.`;
 
-Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, 3 beats each), chapterTitle, narrative (2 sentences continuing the plot), question (story-framed, tied to THIS exact moment), choices (5 unique options with label and value), scenePrompt (pencil sketch of THIS scene).
+const STORY_BATCH_SIZE = 10;
 
-CRITICAL scoring rules for choices:
-- values must be exactly 5, 4, 3, 2, 1 (each used once)
-- value 5 = strongest agreement with the original BFI statement (even if reverseScored)
-- value 1 = strongest disagreement with that statement
-- labels must be story actions tied to THIS beat — never generic agree/disagree scales
-- Never mention Big Five or psychology.`;
+type StoryBatchMeta = {
+  title: string;
+  prologue: string;
+  heroName: string;
+  setting: string;
+};
+
+async function callStoryLlm(
+  provider: "gemini" | "openai",
+  system: string,
+  prompt: string,
+  llmKeys?: LlmKeySource
+): Promise<string> {
+  if (provider === "gemini") {
+    return geminiGenerateText({
+      system,
+      prompt,
+      temperature: 0.85,
+      maxTokens: 8192,
+      json: true,
+      apiKey: llmKeys?.geminiKey ?? undefined,
+      model: llmKeys?.geminiModel ?? undefined,
+    });
+  }
+
+  const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
+  if (!openaiKey) throw new Error("OpenAI key not configured");
+
+  const OpenAI = (await import("openai")).default;
+  const openai = new OpenAI({ apiKey: openaiKey });
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.85,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 8000,
+  });
+  return response.choices[0]?.message?.content || "";
+}
+
+function storyModelFor(provider: "gemini" | "openai", llmKeys?: LlmKeySource): string {
+  return provider === "gemini"
+    ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
+    : "gpt-4o-mini";
+}
+
+async function generateStoryInBatches(
+  userId: string,
+  userName: string | undefined,
+  provider: "gemini" | "openai",
+  llmKeys?: LlmKeySource
+): Promise<StoryJourney | null> {
+  const hero = userName || "Traveler";
+  const arc = buildContinuousArc(hero, pick(SETTINGS, userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0)));
+  let meta: StoryBatchMeta | null = null;
+  const allBeats: StoryBeat[] = [];
+  let storySoFar = "";
+
+  for (let batch = 0; batch < 3; batch++) {
+    const start = batch * STORY_BATCH_SIZE;
+    const end = start + STORY_BATCH_SIZE;
+    const bfiSlice = BFI2_SHORT.slice(start, end).map((q) => ({
+      id: q.id,
+      trait: q.trait,
+      reverseScored: q.reverseScored,
+      original: q.text,
+    }));
+    const arcHints = arc.slice(start, end).map((m, i) => ({
+      beat: start + i + 1,
+      bfiId: BFI2_SHORT[start + i]?.id,
+      plotHint: m.narrative,
+    }));
+
+    const prompt =
+      batch === 0
+        ? `Create the opening of a unique continuous story for "${hero}" (seed: ${userId.slice(0, 8)}).
+Return beats 1-10 only. Use this plot spine:
+${JSON.stringify(arcHints)}
+
+Personality moments to map (same order, same bfiId):
+${JSON.stringify(bfiSlice)}`
+        : `Continue the same story for "${meta?.heroName || hero}" in "${meta?.setting || "a magical realm"}".
+Story so far (last moments): ${storySoFar.slice(-600) || "The journey has begun."}
+
+Return beats ${start + 1}-${end} only. Plot spine for this section:
+${JSON.stringify(arcHints)}
+
+Personality moments (same order, same bfiId):
+${JSON.stringify(bfiSlice)}`;
+
+    const raw = await callStoryLlm(provider, STORY_BATCH_SYSTEM_PROMPT, prompt, llmKeys);
+    const parsed = JSON.parse(raw || "{}") as StoryJourney & { beats?: StoryBeat[] };
+
+    if (batch === 0) {
+      if (!parsed.title || !parsed.prologue || !parsed.beats?.length) {
+        throw new Error(`Batch 1 missing fields (got ${parsed.beats?.length ?? 0} beats)`);
+      }
+      meta = {
+        title: parsed.title,
+        prologue: parsed.prologue,
+        heroName: parsed.heroName || hero,
+        setting: parsed.setting || pick(SETTINGS, 0),
+      };
+    }
+
+    const batchBeats = parsed.beats ?? [];
+    if (batchBeats.length < STORY_BATCH_SIZE) {
+      throw new Error(`Batch ${batch + 1} returned ${batchBeats.length}/10 beats (likely truncated)`);
+    }
+
+    allBeats.push(...batchBeats.slice(0, STORY_BATCH_SIZE));
+    storySoFar = allBeats
+      .slice(-3)
+      .map((b) => b.narrative)
+      .join(" ");
+  }
+
+  if (!meta || allBeats.length !== 30) {
+    throw new Error(`Expected 30 beats, got ${allBeats.length}`);
+  }
+
+  return hydrateStoryBeats({
+    title: meta.title,
+    prologue: meta.prologue,
+    heroName: meta.heroName,
+    setting: meta.setting,
+    beats: allBeats,
+  });
+}
 
 function normalizeBeatChoices(
   beat: StoryBeat,
@@ -367,84 +493,42 @@ export async function generateStoryJourney(
   userName?: string,
   llmKeys?: LlmKeySource
 ): Promise<StoryJourney> {
-  const provider = resolveLlmProvider(llmKeys);
-  const fallback = (): StoryJourney => ({
+  const providerChain = resolveLlmProviderChain(llmKeys);
+  const providerResolved = providerChain[0] ?? null;
+
+  const fallback = (reason: string): StoryJourney => ({
     ...buildFallbackStory(userId, userName),
-    _debug: { storySource: "fallback", storyModel: "built-in-arc" },
+    _debug: {
+      storySource: "fallback",
+      storyModel: "built-in-arc",
+      providerResolved,
+      storyFailureReason: reason,
+    },
   });
 
-  if (!provider) {
-    return fallback();
+  if (!providerChain.length) {
+    return fallback("No LLM API key configured (add Gemini key in Admin → Platform AI Keys)");
   }
 
-  const bfiList = BFI2_SHORT.map((q) => ({
-    id: q.id,
-    trait: q.trait,
-    reverseScored: q.reverseScored,
-    original: q.text,
-  }));
+  const errors: string[] = [];
 
-  const arcOutline = buildContinuousArc(userName || "Traveler", "a magical realm").map((m, i) => ({
-    beat: i + 1,
-    bfiId: BFI2_SHORT[i]?.id,
-    plotHint: m.narrative.slice(0, 80),
-  }));
-
-  const userPrompt = `Create a unique continuous story for "${userName || "Traveler"}" (seed: ${userId.slice(0, 8)}).
-Use this plot spine as inspiration — each beat must flow into the next like chapters of one book:
-${JSON.stringify(arcOutline)}
-
-Map these 30 personality moments to story beats (same order, same bfiId):
-${JSON.stringify(bfiList)}`;
-
-  const storyModel =
-    provider === "gemini"
-      ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
-      : "gpt-4o-mini";
-
-  try {
-    let raw = "";
-
-    if (provider === "gemini") {
-      raw = await geminiGenerateText({
-        system: STORY_SYSTEM_PROMPT,
-        prompt: userPrompt,
-        temperature: 0.9,
-        maxTokens: 8192,
-        json: true,
-        apiKey: llmKeys?.geminiKey ?? undefined,
-        model: llmKeys?.geminiModel ?? undefined,
-      });
-    } else {
-      const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
-      if (!openaiKey) return fallback();
-      const OpenAI = (await import("openai")).default;
-      const openai = new OpenAI({ apiKey: openaiKey });
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0.9,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: STORY_SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 8000,
-      });
-      raw = response.choices[0]?.message?.content || "";
+  for (const provider of providerChain) {
+    const storyModel = storyModelFor(provider, llmKeys);
+    try {
+      const journey = await generateStoryInBatches(userId, userName, provider, llmKeys);
+      if (journey) {
+        return {
+          ...journey,
+          _debug: { storySource: provider, storyModel, providerResolved },
+        };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${provider}: ${msg.slice(0, 200)}`);
     }
-
-    const parsed = JSON.parse(raw || "{}") as StoryJourney;
-    if (parsed.beats?.length === 30) {
-      return {
-        ...hydrateStoryBeats(parsed),
-        _debug: { storySource: provider, storyModel },
-      };
-    }
-  } catch {
-    // fall through
   }
 
-  return fallback();
+  return fallback(errors.join(" | ") || "LLM story generation failed");
 }
 
 export function partialScoresFromResponses(

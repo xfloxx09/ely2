@@ -33,6 +33,8 @@ type StoryJourney = {
   _debug?: {
     storySource?: "gemini" | "openai" | "fallback";
     storyModel?: string;
+    providerResolved?: "gemini" | "openai" | null;
+    storyFailureReason?: string;
     sketchConfigured?: { sketchSource: string; sketchModel?: string };
   };
 };
@@ -42,7 +44,7 @@ type Phase = "loading" | "prologue" | "story" | "submitting" | "reveal";
 type SceneCacheEntry = {
   url: string;
   seed: number;
-  _debug?: { sketchSource: string; sketchModel?: string };
+  _debug?: { sketchSource: string; sketchModel?: string; sketchFailureReason?: string };
 };
 
 function sceneSeedForBeat(bfiId: number, answerValue?: number) {
@@ -291,9 +293,22 @@ export default function PersonalityOnboarding() {
           </motion.p>
 
           {story._debug && (
-            <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 font-mono text-[10px] text-amber-100/85">
-              Debug · Story: {story._debug.storySource} ({story._debug.storyModel}) · Sketch configured:{" "}
-              {story._debug.sketchConfigured?.sketchSource} ({story._debug.sketchConfigured?.sketchModel})
+            <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-amber-100/85">
+              <span className="font-semibold text-amber-200">Debug</span>
+              {" · "}
+              Story: {story._debug.storySource} ({story._debug.storyModel})
+              {story._debug.providerResolved && story._debug.providerResolved !== story._debug.storySource
+                ? ` · tried: ${story._debug.providerResolved}`
+                : ""}
+              {" · "}
+              Sketch configured: {story._debug.sketchConfigured?.sketchSource} (
+              {story._debug.sketchConfigured?.sketchModel})
+              {story._debug.storyFailureReason ? (
+                <>
+                  <br />
+                  <span className="text-amber-200/90">Why fallback: {story._debug.storyFailureReason}</span>
+                </>
+              ) : null}
             </p>
           )}
 
@@ -360,9 +375,22 @@ export default function PersonalityOnboarding() {
               <span className="font-semibold text-amber-200">Debug</span>
               {" · "}
               Story: {storyDebug?.storySource ?? "?"} ({storyDebug?.storyModel ?? "unknown"})
+              {storyDebug?.providerResolved ? ` · provider: ${storyDebug.providerResolved}` : ""}
               {" · "}
               Sketch: {sketchDebug?.sketchSource ?? storyDebug?.sketchConfigured?.sketchSource ?? "?"}
               ({sketchDebug?.sketchModel ?? storyDebug?.sketchConfigured?.sketchModel ?? "pending"})
+              {storyDebug?.storyFailureReason ? (
+                <>
+                  <br />
+                  <span className="text-amber-200/90">Story fallback: {storyDebug.storyFailureReason}</span>
+                </>
+              ) : null}
+              {sketchDebug?.sketchFailureReason ? (
+                <>
+                  <br />
+                  <span className="text-amber-200/90">Sketch fallback: {sketchDebug.sketchFailureReason}</span>
+                </>
+              ) : null}
             </div>
           )}
           <div className="mb-2 flex items-center justify-between text-xs text-ely-muted">
