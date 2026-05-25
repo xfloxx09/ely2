@@ -41,6 +41,9 @@ importers:
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
       fastify:
         specifier: ^5.2.0
         version: 5.8.5
@@ -53,6 +56,9 @@ importers:
       stripe:
         specifier: ^17.5.0
         version: 17.7.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -63,9 +69,6 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.19
-      tsx:
-        specifier: ^4.19.2
-        version: 4.22.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -151,9 +154,15 @@ importers:
       '@ely/mlm':
         specifier: workspace:*
         version: link:../../packages/mlm
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
       node-cron:
         specifier: ^3.0.3
         version: 3.0.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -161,9 +170,6 @@ importers:
       '@types/node-cron':
         specifier: ^3.0.11
         version: 3.0.11
-      tsx:
-        specifier: ^4.19.2
-        version: 4.22.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -194,13 +200,13 @@ importers:
       socket.io:
         specifier: ^4.8.1
         version: 4.8.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.19
-      tsx:
-        specifier: ^4.19.2
-        version: 4.22.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
