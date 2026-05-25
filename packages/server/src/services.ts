@@ -152,14 +152,15 @@ export async function submitPersonalityTest(
 
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
 
-  if (user?.tier === "PRO") {
-    await generateUserAvatar(userId, scores);
+  let avatar = null;
+  if (user?.tier === "PRO" || formType === "short") {
+    avatar = await generateUserAvatar(userId, scores);
   }
 
   await completeQuest(userId, "personality_complete");
   await checkAndAwardBadges(userId);
 
-  return { scores, profile };
+  return { scores, profile, avatar };
 }
 
 export async function generateUserAvatar(userId: string, scores?: { openness: number; conscientiousness: number; extraversion: number; agreeableness: number; neuroticism: number }) {

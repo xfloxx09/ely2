@@ -317,6 +317,9 @@ importers:
       '@ely/db':
         specifier: workspace:*
         version: link:../db
+      openai:
+        specifier: ^4.77.0
+        version: 4.104.0(ws@8.20.1)(zod@3.25.76)
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

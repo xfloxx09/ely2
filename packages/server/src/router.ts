@@ -2,6 +2,12 @@ import { eq } from "drizzle-orm";
 import { getDb, users, subscriptions, elyCredits, creditTransactions, affiliates } from "@ely/db";
 import { BFI2_SHORT, BFI2_LONG } from "@ely/personality";
 import {
+  generateStoryJourney,
+  partialScoresFromResponses,
+  generateSketchSceneSvg,
+  generateAvatarSilhouetteSvg,
+} from "@ely/personality";
+import {
   registerUser,
   loginUser,
   getUserById,
@@ -85,6 +91,38 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
     if (method === "GET" && path === "/auth/me") {
       const user = await getUserById(userId!);
       return { status: 200, body: { user } };
+    }
+
+    if (method === "POST" && path === "/personality/story/generate") {
+      const user = await getUserById(userId!);
+      const story = await generateStoryJourney(userId!, user?.name || undefined);
+      return { status: 200, body: story };
+    }
+
+    if (method === "POST" && path === "/personality/story/preview") {
+      const { responses, beats, beatIndex } = body as {
+        responses: Record<number, number>;
+        beats: { bfiId: number; trait: string }[];
+        beatIndex: number;
+      };
+      const partial = partialScoresFromResponses(responses, beats as import("@ely/personality").StoryBeat[]);
+      const progress = beats.length ? (beatIndex + 1) / beats.length : 0;
+      const blur = Math.max(4, 40 - progress * 36);
+      const avatarPreview = generateAvatarSilhouetteSvg(partial, blur);
+      return { status: 200, body: { avatarPreview, partial, blur, progress } };
+    }
+
+    if (method === "POST" && path === "/personality/story/scene") {
+      const { scenePrompt, seed, answerValue } = body as {
+        scenePrompt: string;
+        seed: number;
+        answerValue?: number;
+      };
+      const moods = ["shadowed, quiet, inward", "soft, uncertain, misty", "balanced, neutral light", "bright, forward, open", "bold, radiant, vivid"];
+      const mood = answerValue ? moods[Math.min(4, Math.max(0, answerValue - 1))] : "";
+      const prompt = mood ? `${scenePrompt}, ${mood}` : scenePrompt;
+      const imageUrl = generateSketchSceneSvg(prompt, seed ?? Date.now());
+      return { status: 200, body: { imageUrl } };
     }
 
     if (method === "GET" && path.startsWith("/personality/questions")) {
