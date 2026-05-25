@@ -8,6 +8,7 @@
     "db:generate": "pnpm --filter @ely/db generate",
     "db:migrate": "pnpm --filter @ely/db migrate",
     "db:seed": "pnpm --filter @ely/db seed",
+    "db:seed-demo": "pnpm --filter @ely/db seed-demo",
     "db:create-admin": "pnpm --filter @ely/db create-admin",
     "db:push": "pnpm --filter @ely/db push"
   },

@@ -12,13 +12,16 @@
     "migrate": "tsx src/migrate.ts",
     "push": "drizzle-kit push",
     "seed": "tsx src/seed.ts",
-    "create-admin": "tsx src/create-admin.ts"
+    "create-admin": "tsx src/create-admin.ts",
+    "seed-demo": "tsx src/seed-demo-users.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5",
     "bcryptjs": "^2.4.3",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.0.9",
+    "@ely/personality": "workspace:*",
+    "@ely/ai": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "^0.30.1",

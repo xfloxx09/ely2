@@ -254,6 +254,12 @@ importers:
 
   packages/db:
     dependencies:
+      '@ely/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@ely/personality':
+        specifier: workspace:*
+        version: link:../personality
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
