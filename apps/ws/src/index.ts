@@ -134,15 +134,12 @@ io.on("connection", (socket) => {
 
       if (intent.module && moduleHandlers[intent.module]) {
         const handler = moduleHandlers[intent.module]!;
-        const [commProfile] = await db
-          .select()
-          .from(communicationProfiles)
-          .where(eq(communicationProfiles.userId, userId))
-          .limit(1);
 
         const result = await handler(content, {
           userId,
-          profile,
+          profile: commProfile
+            ? { styleSummary: commProfile.styleSummary, systemPromptAddendum: commProfile.systemPromptAddendum, preferences: commProfile.preferences as Record<string, unknown> }
+            : getNeutralProfile(),
           preferences: (commProfile?.preferences as Record<string, unknown>) || {},
         });
 
