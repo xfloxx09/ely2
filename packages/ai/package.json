@@ -1,0 +1,19 @@
+{
+  "name": "@ely/ai",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ely/db": "workspace:*",
+    "@ely/personality": "workspace:*",
+    "openai": "^4.77.0",
+    "@anthropic-ai/sdk": "^0.33.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@ely/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "push": "drizzle-kit push",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.3",
+    "postgres": "^3.4.5",
+    "bcryptjs": "^2.4.3",
+    "nanoid": "^5.0.9"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.1",
+    "tsx": "^4.19.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
