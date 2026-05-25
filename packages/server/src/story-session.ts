@@ -8,9 +8,13 @@ import {
 } from "@ely/personality";
 import type { LlmKeySource } from "@ely/personality";
 
+/** Bump when story generation logic changes — invalidates cached onboarding drafts. */
+export const STORY_ENGINE_VERSION = 2;
+
 export type StoryDraft = StoryJourney & {
   id: string;
   createdAt: string;
+  engineVersion?: number;
 };
 
 export type StoryDraftSummary = {
@@ -102,8 +106,13 @@ function toDraft(story: StoryJourney, draftId: string): StoryDraft {
     ...rest,
     id: draftId,
     createdAt: new Date().toISOString(),
+    engineVersion: STORY_ENGINE_VERSION,
     _debug,
   };
+}
+
+function draftsAreCurrent(drafts: StoryDraft[]): boolean {
+  return drafts.length > 0 && drafts.every((d) => (d.engineVersion ?? 0) >= STORY_ENGINE_VERSION);
 }
 
 function stripDraftForClient(draft: StoryDraft): StoryJourney {
@@ -146,8 +155,14 @@ export async function generateStoryForUser(
 
   const maxRerolls = storyRerollLimitForTier(tier);
   const existing = await loadSession(userId);
-  const drafts = existing?.drafts ?? [];
-  const rerollsUsed = existing?.rerolls_used ?? 0;
+  let drafts = existing?.drafts ?? [];
+  let rerollsUsed = existing?.rerolls_used ?? 0;
+
+  if (drafts.length > 0 && !draftsAreCurrent(drafts)) {
+    drafts = [];
+    rerollsUsed = 0;
+    await saveSession(userId, 0, null, []);
+  }
 
   if (options?.reroll) {
     if (rerollsUsed >= maxRerolls) {

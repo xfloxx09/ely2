@@ -1,7 +1,6 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
 import { geminiGenerateText, geminiChatCompletion, resolveLlmProviderChain, type LlmKeySource, type GeminiMessage } from "./gemini.js";
-import { buildContinuousArc } from "./story-arc.js";
 
 export type StoryChoice = {
   label: string;
@@ -46,6 +45,7 @@ export type StoryGenerationDebug = {
   storyPartialFill?: boolean;
   storyWarnings?: string[];
   storySeed?: string;
+  storyPremise?: string;
 };
 
 export type StoryGenerationOptions = {
@@ -130,17 +130,59 @@ const TIMELINE_ERAS = [
   "Post-apocalyptic future — 50 years after the collapse",
 ];
 
+/** Fully distinct story concepts — each run must commit to ONE premise, not a generic quest. */
+const STORY_PREMISES = [
+  "A wealthy teenager in modern Monaco discovers their entire life is being live-streamed to an unknown audience",
+  "A Bronze Age village child befriends a stray god disguised as a wounded wolf",
+  "First contact: a night-shift barista on a orbital habitat serves an alien diplomat who speaks in colors",
+  "A medieval blacksmith's apprentice hides a forbidden clockwork heart from the inquisitors",
+  "A retired detective in 1970s Tokyo investigates crimes that happen only inside shared dreams",
+  "A New Age wellness guru on a Bali retreat realizes one guest can actually see souls",
+  "An AI caretaker wakes inside a museum of extinct animals after humanity silently vanishes",
+  "A Viking merchant's daughter brokers peace between raiders and monks during a white winter",
+  "A street magician in 1920s Cairo finds real magic leaking through a cracked tomb seal",
+  "A Martian colonist teenager races to save their hydroponic dome before the dust season",
+  "A Regency-era governess inherits a haunted estate that rewrites itself each dawn",
+  "A professional esports player gets trapped inside their favorite game during a tournament blackout",
+  "A samurai's child in Edo-period Japan carries a letter that could start a war",
+  "An underwater biologist in 2035 discovers sentient coral that remembers the surface world",
+  "A circus runaway in Victorian London joins a secret society of inventors",
+  "A desert nomad during the Silk Road era guides a stranger who never casts a shadow",
+  "A hospice nurse in present-day Dublin begins receiving messages from patients not yet born",
+  "A pirate cartographer's apprentice maps islands that appear only during storms",
+  "A quantum physicist in a near-future lab accidentally splits their personality across timelines",
+  "A palace scribe in ancient Mesopotamia must forge a peace treaty between rival kings",
+  "A suburban kid finds a portal to a dimension where emotions are traded as currency",
+  "A jazz musician in 1950s New Orleans plays a song that opens doors to the dead",
+  "A climate refugee fleet captain navigates floating cities through acid seas",
+  "A witch trial survivor in 1600s Salem runs a hidden library of forbidden science",
+  "An interstellar courier delivers a package that screams when opened",
+  "A Michelin chef's protégé cooks meals that force diners to relive their memories",
+  "A Mongolian eagle hunter's sibling tracks a beast that steals names from the living",
+  "A Hollywood stunt double wakes up as the actor they replace — who has just been murdered",
+  "A monastery gardener in the Middle Ages tends plants that grow backward through time",
+  "A deep-sea welder repairs a cable and hears voices from the planet's molten core",
+];
+
+const TRAIT_THEMES: Record<string, string> = {
+  extraversion: "social energy, speaking up, crowds vs solitude, leading vs listening",
+  agreeableness: "empathy, conflict, trust, forgiveness, helping strangers",
+  conscientiousness: "order vs chaos, duty, planning, reliability, temptation to slack",
+  neuroticism: "stress, mood swings, worry, resilience after setbacks, calm under pressure",
+  openness: "curiosity, art, imagination, abstract ideas, tradition vs novelty",
+};
+
 const CHAPTER_TITLES = [
-  "The Threshold",
-  "The First Light",
-  "A Stranger's Gift",
-  "The Hidden Path",
-  "Echoes of Choice",
-  "The Mirror Pool",
-  "Crossroads of Heart",
-  "The Long Road",
-  "Gathering Storm",
-  "The Inner Door",
+  "Opening",
+  "Rising",
+  "Turn",
+  "Depths",
+  "Crossroads",
+  "Reckoning",
+  "Trial",
+  "Drift",
+  "Storm",
+  "Threshold",
 ];
 
 function pick<T>(arr: T[], seed: number): T {
@@ -154,13 +196,24 @@ function hashString(input: string): number {
 function creativeBriefForSeed(storySeed: string) {
   const h = hashString(storySeed);
   const timelineEra = pick(TIMELINE_ERAS, h + 19);
+  const premise = pick(STORY_PREMISES, h + 23);
   return {
     settingHint: pick(SETTINGS, h),
     genreHint: pick(STORY_GENRES, h + 7),
     toneHint: pick(STORY_TONES, h + 13),
     timelineEra,
+    premise,
     runId: storySeed.slice(0, 12),
   };
+}
+
+function personalityBeatHints(start: number, end: number) {
+  return BFI2_SHORT.slice(start, end).map((q, i) => ({
+    beat: start + i + 1,
+    bfiId: q.id,
+    trait: q.trait,
+    theme: TRAIT_THEMES[q.trait] ?? q.trait,
+  }));
 }
 
 function settingForSeed(storySeed: string): string {
@@ -395,10 +448,6 @@ function parseWorldContext(parsed: Record<string, unknown>, hero: string, settin
   );
 }
 
-function scenePromptFromArc(setting: string, chapter: number, sceneDetail: string): string {
-  return `${setting}, ${sceneDetail}, chapter ${chapter}, continuous story journey, pencil sketch, graphite on paper, no text`;
-}
-
 export function buildFallbackStory(
   userId: string,
   userName?: string,
@@ -406,35 +455,26 @@ export function buildFallbackStory(
 ): StoryJourney {
   const seedKey = storySeed || userId;
   const hero = userName?.split(" ")[0] || "You";
-  const setting = settingForSeed(seedKey);
   const brief = creativeBriefForSeed(seedKey);
-  const title = `The ${brief.genreHint.split(" ")[0] ?? "Awakening"} of ${hero}`;
-  const arc = buildContinuousArc(hero, setting);
+  const setting = brief.premise.split(":")[0]?.slice(0, 80) || settingForSeed(seedKey);
+  const title = brief.premise.split(/[.!]/)[0]?.slice(0, 60) || `Tale of ${hero}`;
 
-  const beats: StoryBeat[] = BFI2_SHORT.map((q, i) => {
-    const chapter = Math.floor(i / 3) + 1;
-    const moment = arc[i]!;
-    return {
-      id: i + 1,
-      bfiId: q.id,
-      trait: q.trait,
-      chapter,
-      chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
-      narrative: moment.narrative,
-      question: moment.question,
-      choices: contextualStoryChoices(q, hero, i),
-      scenePrompt: scenePromptFromArc(setting, chapter, moment.sceneDetail),
-    };
-  });
+  const beats: StoryBeat[] = BFI2_SHORT.map((q, i) =>
+    buildTraitFallbackBeat(i, hero, setting, brief.premise)
+  );
 
   return {
     title,
-    prologue: `${hero} steps into ${setting} with a blank map that only fills when their story is told truthfully. Over thirty moments, one journey unfolds — from the first lantern to the mirror pool where a companion takes shape. This is not a test. It is the tale of how ${hero} becomes whole.`,
+    prologue: brief.premise,
     heroName: hero,
     setting,
     worldContext: normalizeWorldContext(
       {
-        timeline: `${brief.timelineEra} — the events unfold over a few continuous days within this period`,
+        framing: "Fictional — invented for this journey",
+        timeline: `${brief.timelineEra} — events unfold over several days in this period`,
+        place: setting,
+        yourRole: `You are ${hero}, living inside this premise. Every choice is yours.`,
+        mood: brief.toneHint,
       },
       hero,
       setting
@@ -443,22 +483,51 @@ export function buildFallbackStory(
   };
 }
 
-const STORY_BATCH_SYSTEM_PROMPT = `You write ONE continuous, linear story for personality discovery. Return compact JSON only.
-Each run must be a completely NEW story — original title, world, plot, and mood. Never reuse boilerplate fantasy quest templates.
+const STORY_BATCH_SYSTEM_PROMPT = `You write ONE continuous story for personality discovery. Return compact JSON only.
+
+CRITICAL: Every run is a totally different story. Premises can be ANY genre — sci-fi, aliens, medieval, modern wealth, horror, comedy, historical, surreal, whatever fits the brief. NEVER default to a fantasy quest with maps, lanterns, mirror pools, travelers, or mystical journeys.
+
 Batch 1: title, prologue (2 sentences max), heroName, setting, worldContext, beats (exactly N items).
 Later batches: beats array only (exactly N items).
 
 worldContext (batch 1 only): {
-  "framing": "Fictional fable | Dream allegory | Historical fiction | etc. — state clearly if this is real, invented, or symbolic",
-  "timeline": "MUST name a historical era or specific year/century, then the story span. Examples: 'Bronze Age, ~1200 BCE, three moonlit nights' | 'Modern era, 2026, one rainy weekend' | 'Industrial Revolution, 1840s, across five days'. Never vague timelines without an era or year.",
-  "place": "Where the user is situated — geography, atmosphere (era belongs in timeline, not here)",
-  "yourRole": "1-2 sentences: who the player is and how to inhabit this story",
+  "framing": "Fictional | Historical fiction | Sci-fi | Surreal dream | etc.",
+  "timeline": "MUST name era or year plus span (e.g. 'Medieval, 1240s, four days' | 'Modern, 2026, one weekend' | 'Far future, 2400, a single orbit')",
+  "place": "Specific location in that era",
+  "yourRole": "Who the player is in THIS premise — 1-2 sentences",
   "mood": "Overall emotional tone"
 }
 
-Rules: Same hero, same world bible, cause-and-effect between beats. No random genre or timeline jumps within one story.
-Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence advancing the SAME plot), question (one line), choices (5 label+value), scenePrompt (brief).
-Choice values 5,4,3,2,1 once each. Labels under 12 words. Never mention Big Five or psychology.`;
+Each beat must advance YOUR invented plot. Weave personality themes naturally — never mention Big Five or psychology.
+Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence), question (one line), choices (5 label+value), scenePrompt (visual, no text in image).
+Choice values 5,4,3,2,1 once each. Labels under 12 words.`;
+
+function scenePromptFromBeat(setting: string, chapter: number, narrative: string): string {
+  const detail = narrative.slice(0, 100).replace(/["']/g, "");
+  return `${setting}, ${detail}, chapter ${chapter}, pencil sketch, graphite on paper, no text`;
+}
+
+function buildTraitFallbackBeat(
+  globalIndex: number,
+  hero: string,
+  setting: string,
+  premise: string
+): StoryBeat {
+  const q = BFI2_SHORT[globalIndex]!;
+  const chapter = Math.floor(globalIndex / 3) + 1;
+  const theme = TRAIT_THEMES[q.trait] ?? q.trait;
+  return {
+    id: globalIndex + 1,
+    bfiId: q.id,
+    trait: q.trait,
+    chapter,
+    chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
+    narrative: `Within "${premise.slice(0, 70)}…", ${hero} faces a moment shaped by ${theme}.`,
+    question: `Standing in this situation, what would ${hero} do?`,
+    choices: contextualStoryChoices(q, hero, globalIndex),
+    scenePrompt: scenePromptFromBeat(setting, chapter, premise),
+  };
+}
 
 const STORY_BATCH_SIZE = 5;
 const STORY_BATCH_COUNT = 6;
@@ -502,21 +571,13 @@ function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBea
   }
 }
 
-function buildBeatFromArc(globalIndex: number, hero: string, setting: string, arc: ReturnType<typeof buildContinuousArc>): StoryBeat {
-  const q = BFI2_SHORT[globalIndex]!;
-  const moment = arc[globalIndex]!;
-  const chapter = Math.floor(globalIndex / 3) + 1;
-  return {
-    id: globalIndex + 1,
-    bfiId: q.id,
-    trait: q.trait,
-    chapter,
-    chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
-    narrative: moment.narrative,
-    question: moment.question,
-    choices: contextualStoryChoices(q, hero, globalIndex),
-    scenePrompt: scenePromptFromArc(setting, chapter, moment.sceneDetail),
-  };
+const FORBIDDEN_STORY_PATTERNS =
+  /blank map|mirror pool|lantern quest|mystical journey|traveler collaps|festival has begun|glowing map|continuous story journey/i;
+
+function isUsableLlmBeat(candidate: StoryBeat | undefined): candidate is StoryBeat {
+  if (!candidate?.narrative || candidate.narrative.length < 12) return false;
+  if (FORBIDDEN_STORY_PATTERNS.test(candidate.narrative)) return false;
+  return true;
 }
 
 function mergeBatchBeats(
@@ -524,7 +585,7 @@ function mergeBatchBeats(
   llmBeats: StoryBeat[],
   hero: string,
   setting: string,
-  arc: ReturnType<typeof buildContinuousArc>
+  premise: string
 ): { beats: StoryBeat[]; filled: number } {
   const result: StoryBeat[] = [];
   let filled = 0;
@@ -539,11 +600,7 @@ function mergeBatchBeats(
     const candidate = byBfi || byIndex;
     const chapter = Math.floor(globalIndex / 3) + 1;
 
-    if (
-      candidate?.narrative &&
-      candidate.narrative.length > 30 &&
-      !candidate.narrative.includes("world seems to pause")
-    ) {
+    if (isUsableLlmBeat(candidate)) {
       result.push({
         ...candidate,
         id: globalIndex + 1,
@@ -558,10 +615,10 @@ function mergeBatchBeats(
         scenePrompt:
           candidate.scenePrompt && candidate.scenePrompt.length > 10
             ? candidate.scenePrompt
-            : scenePromptFromArc(setting, chapter, arc[globalIndex]!.sceneDetail),
+            : scenePromptFromBeat(setting, chapter, candidate.narrative),
       });
     } else {
-      result.push(buildBeatFromArc(globalIndex, hero, setting, arc));
+      result.push(buildTraitFallbackBeat(globalIndex, hero, setting, premise));
       filled++;
     }
   }
@@ -581,7 +638,7 @@ async function fetchStoryBatchSingle(
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const temperature = attempt === 0 ? (batchIndex === 0 ? 0.92 : 0.85) : attempt === 1 ? 0.65 : 0.45;
+      const temperature = attempt === 0 ? (batchIndex === 0 ? 1 : 0.9) : attempt === 1 ? 0.75 : 0.55;
       const raw =
         provider === "gemini"
           ? await geminiGenerateText({
@@ -622,7 +679,7 @@ async function fetchStoryBatchChat(
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const temperature = attempt === 0 ? 0.75 : attempt === 1 ? 0.6 : 0.45;
+      const temperature = attempt === 0 ? 0.9 : attempt === 1 ? 0.75 : 0.55;
       const raw =
         provider === "gemini"
           ? await geminiChatCompletion({
@@ -654,6 +711,7 @@ type StoryBatchMeta = {
   prologue: string;
   heroName: string;
   setting: string;
+  premise: string;
   worldContext: StoryWorldContext;
 };
 
@@ -735,41 +793,39 @@ function buildBatchPrompt(
   storySoFar: string,
   start: number,
   end: number,
-  arcHints: unknown,
-  bfiSlice: unknown
+  personalityHints: unknown
 ): string {
+  const brief = creativeBriefForSeed(storySeed);
+
   if (batch === 0) {
-    const brief = creativeBriefForSeed(storySeed);
-    return `Create a BRAND NEW story for "${hero}". This run id is unique: ${brief.runId}.
-Use the creative brief below as inspiration only — invent fresh details, an original title, and a distinct plot:
-- Genre vibe: ${brief.genreHint}
-- Setting inspiration: ${brief.settingHint}
-- Emotional tone: ${brief.toneHint}
-- Timeline inspiration: ${brief.timelineEra} (you MUST state a clear era or year in worldContext.timeline)
+    return `Write a COMPLETELY ORIGINAL story. Run id: ${brief.runId}.
 
-Do NOT copy generic "blank map / mirror pool / lantern quest" templates. Build something specific to this brief.
-Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine (personality moments to weave in — reinterpret creatively):
-${JSON.stringify(arcHints)}
+MANDATORY PREMISE — the entire plot must follow this (adapt freely but stay in this world):
+"${brief.premise}"
 
-Map these personality moments in order (same bfiId):
-${JSON.stringify(bfiSlice)}`;
+You may reinterpret genre, era, and cast — but do NOT fall back to a generic fantasy quest.
+Timeline anchor: ${brief.timelineEra}
+Tone: ${brief.toneHint}
+
+Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}).
+Each beat explores a personality theme through YOUR plot (not a template journey):
+${JSON.stringify(personalityHints)}`;
   }
 
-  return `Continue the SAME story you already started for "${meta?.heroName || hero}".
-DO NOT change the world bible. Stay in the same framing, timeline, and place:
+  return `Continue the SAME story for "${meta?.heroName || hero}".
+Premise (do not abandon): "${meta?.premise || brief.premise}"
+World bible:
 ${JSON.stringify(meta?.worldContext)}
 
 Title: ${meta?.title || "Untitled"}
-Recent plot: ${storySoFar.slice(-500) || "The journey has begun."}
+Setting: ${meta?.setting || setting}
+Recent plot: ${storySoFar.slice(-600) || "Story just started."}
 
 Return JSON ONLY: {"beats":[...]}
-Exactly ${STORY_BATCH_SIZE} beats with ids ${start + 1} through ${end}. Each beat must follow logically from the previous.
+Exactly ${STORY_BATCH_SIZE} beats, ids ${start + 1}-${end}. Same world, same characters, new plot events.
 
-Plot spine:
-${JSON.stringify(arcHints)}
-
-Personality moments in order (same bfiId):
-${JSON.stringify(bfiSlice)}`;
+Personality themes for these beats (weave into YOUR story):
+${JSON.stringify(personalityHints)}`;
 }
 
 function storyModelFor(provider: "gemini" | "openai", llmKeys?: LlmKeySource): string {
@@ -786,8 +842,8 @@ async function generateStoryInBatches(
   storySeed: string
 ): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean } | null> {
   const hero = userName || "Traveler";
-  const setting = settingForSeed(storySeed);
-  const arc = buildContinuousArc(hero, setting);
+  const brief = creativeBriefForSeed(storySeed);
+  const settingHint = brief.settingHint;
   let meta: StoryBatchMeta | null = null;
   const allBeats: StoryBeat[] = [];
   let storySoFar = "";
@@ -804,28 +860,18 @@ async function generateStoryInBatches(
 
     const start = batch * STORY_BATCH_SIZE;
     const end = start + STORY_BATCH_SIZE;
-    const bfiSlice = BFI2_SHORT.slice(start, end).map((q) => ({
-      id: q.id,
-      trait: q.trait,
-      reverseScored: q.reverseScored,
-    }));
-    const arcHints = arc.slice(start, end).map((m, i) => ({
-      beat: start + i + 1,
-      bfiId: BFI2_SHORT[start + i]?.id,
-      plotHint: m.narrative.slice(0, 120),
-    }));
+    const personalityHints = personalityBeatHints(start, end);
 
     const prompt = buildBatchPrompt(
       batch,
       hero,
       storySeed,
       meta,
-      setting,
+      meta?.setting || settingHint,
       storySoFar,
       start,
       end,
-      arcHints,
-      bfiSlice
+      personalityHints
     );
 
     let parsed: Partial<StoryJourney> & { beats?: StoryBeat[] };
@@ -841,7 +887,7 @@ async function generateStoryInBatches(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (batch === 0) throw new Error(`Batch 1 failed: ${msg}`);
-      warnings.push(`Batch ${batch + 1} LLM failed (${msg}); filled from built-in arc`);
+      warnings.push(`Batch ${batch + 1} LLM failed (${msg}); filled with premise-based placeholders`);
       parsed = { beats: [] };
       partialFill = true;
     }
@@ -854,8 +900,9 @@ async function generateStoryInBatches(
         title: parsed.title,
         prologue: parsed.prologue,
         heroName: parsed.heroName || hero,
-        setting: parsed.setting || setting,
-        worldContext: parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || setting),
+        setting: parsed.setting || settingHint,
+        premise: brief.premise,
+        worldContext: parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || settingHint),
       };
     }
 
@@ -864,18 +911,18 @@ async function generateStoryInBatches(
       start,
       llmBeats,
       meta?.heroName || hero,
-      meta?.setting || setting,
-      arc
+      meta?.setting || settingHint,
+      meta?.premise || brief.premise
     );
 
     if (filled > 0) {
       partialFill = true;
       if (llmBeats.length === 0) {
         const hint = raw ? ` response: ${raw.slice(0, 80).replace(/\s+/g, " ")}…` : "";
-        warnings.push(`Batch ${batch + 1} returned 0/${STORY_BATCH_SIZE} beats; used built-in arc for all${hint}`);
+        warnings.push(`Batch ${batch + 1} returned 0/${STORY_BATCH_SIZE} beats; used placeholders for all${hint}`);
       } else {
         warnings.push(
-          `Batch ${batch + 1} returned ${llmBeats.length}/${STORY_BATCH_SIZE} beats; filled ${filled} from built-in arc`
+          `Batch ${batch + 1} returned ${llmBeats.length}/${STORY_BATCH_SIZE} beats; filled ${filled} with placeholders`
         );
       }
     }
@@ -924,34 +971,28 @@ function normalizeBeatChoices(
 
 function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
   const hero = journey.heroName || "You";
-  const setting = journey.setting || pick(SETTINGS, 0);
-  const arc = buildContinuousArc(hero, setting);
+  const setting = journey.setting || "the story world";
 
   const beats = journey.beats.map((beat, index) => {
     const question = BFI2_SHORT.find((q) => q.id === beat.bfiId);
-    const fallback = arc[index];
     if (!question) return beat;
 
+    const chapter = beat.chapter || Math.floor(index / 3) + 1;
     const narrative =
-      beat.narrative && beat.narrative.length > 50 && !beat.narrative.includes("world seems to pause")
+      beat.narrative && !FORBIDDEN_STORY_PATTERNS.test(beat.narrative)
         ? beat.narrative
-        : fallback?.narrative || beat.narrative;
-
-    const storyQuestion =
-      beat.question && beat.question.length > 30 ? beat.question : fallback?.question || beat.question;
-
-    const scenePrompt =
-      beat.scenePrompt && beat.scenePrompt.length > 20
-        ? beat.scenePrompt
-        : fallback
-          ? scenePromptFromArc(setting, beat.chapter || Math.floor(index / 3) + 1, fallback.sceneDetail)
-          : beat.scenePrompt;
+        : beat.narrative;
 
     return {
       ...beat,
+      chapter,
+      chapterTitle: beat.chapterTitle || CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
       narrative,
-      question: storyQuestion,
-      scenePrompt,
+      question: beat.question?.trim() ? beat.question : `What would ${hero} do next?`,
+      scenePrompt:
+        beat.scenePrompt && beat.scenePrompt.length > 10
+          ? beat.scenePrompt
+          : scenePromptFromBeat(setting, chapter, narrative || journey.prologue),
       choices: normalizeBeatChoices(beat, question, hero, index),
     };
   });
@@ -966,6 +1007,7 @@ export async function generateStoryJourney(
   options?: StoryGenerationOptions
 ): Promise<StoryJourney> {
   const storySeed = options?.storySeed || createStorySeed();
+  const brief = creativeBriefForSeed(storySeed);
   const providerChain = resolveLlmProviderChain(llmKeys);
   const providerResolved = providerChain[0] ?? null;
 
@@ -977,6 +1019,7 @@ export async function generateStoryJourney(
       providerResolved,
       storyFailureReason: reason,
       storySeed,
+      storyPremise: brief.premise,
     },
   });
 
@@ -1000,6 +1043,7 @@ export async function generateStoryJourney(
             storyPartialFill: result.partialFill,
             storyWarnings: result.warnings.length ? result.warnings : undefined,
             storySeed,
+            storyPremise: brief.premise,
           },
         };
       }
