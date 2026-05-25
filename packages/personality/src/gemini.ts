@@ -95,10 +95,20 @@ async function geminiRequest(
   }
 
   const data = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: {
+      content?: { parts?: { text?: string }[] };
+      finishReason?: string;
+    }[];
   };
 
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.[0]?.text?.trim() || "";
+  if (!text) {
+    const reason = candidate?.finishReason || "unknown";
+    throw new Error(`Gemini empty response (finishReason: ${reason})`);
+  }
+
+  return text;
 }
 
 export async function geminiGenerateText(options: {

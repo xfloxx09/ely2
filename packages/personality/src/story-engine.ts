@@ -1,6 +1,6 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
-import { geminiGenerateText, resolveLlmProviderChain, type LlmKeySource } from "./gemini.js";
+import { geminiGenerateText, geminiChatCompletion, resolveLlmProviderChain, type LlmKeySource, type GeminiMessage } from "./gemini.js";
 import { buildContinuousArc } from "./story-arc.js";
 
 export type StoryChoice = {
@@ -304,15 +304,40 @@ Never mention Big Five or psychology. Output valid complete JSON.`;
 const STORY_BATCH_SIZE = 5;
 const STORY_BATCH_COUNT = 6;
 
+type ChatTurn = { role: "user" | "assistant"; content: string };
+
+function extractBeatsFromJson(parsed: Record<string, unknown>): StoryBeat[] {
+  const direct = [parsed.beats, parsed.storyBeats, parsed.items];
+  for (const candidate of direct) {
+    if (Array.isArray(candidate) && candidate.length) {
+      return candidate as StoryBeat[];
+    }
+  }
+  for (const val of Object.values(parsed)) {
+    if (
+      Array.isArray(val) &&
+      val.length &&
+      typeof val[0] === "object" &&
+      val[0] !== null &&
+      ("bfiId" in (val[0] as object) || "narrative" in (val[0] as object))
+    ) {
+      return val as StoryBeat[];
+    }
+  }
+  return [];
+}
+
 function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBeat[] } {
   const trimmed = raw.trim();
   if (!trimmed) return { beats: [] };
   try {
-    return JSON.parse(trimmed) as Partial<StoryJourney> & { beats?: StoryBeat[] };
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    return { ...(parsed as Partial<StoryJourney>), beats: extractBeatsFromJson(parsed) };
   } catch {
     const match = trimmed.match(/\{[\s\S]*\}/);
     if (match) {
-      return JSON.parse(match[0]) as Partial<StoryJourney> & { beats?: StoryBeat[] };
+      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+      return { ...(parsed as Partial<StoryJourney>), beats: extractBeatsFromJson(parsed) };
     }
     throw new Error(`Invalid story JSON (${trimmed.slice(0, 120)}…)`);
   }
@@ -385,7 +410,7 @@ function mergeBatchBeats(
   return { beats: result, filled };
 }
 
-async function fetchStoryBatch(
+async function fetchStoryBatchSingle(
   provider: "gemini" | "openai",
   system: string,
   prompt: string,
@@ -413,6 +438,47 @@ async function fetchStoryBatch(
 
       if (raw?.trim()) return raw;
       lastError = `batch ${batchIndex + 1} empty response`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+async function fetchStoryBatchChat(
+  provider: "gemini" | "openai",
+  system: string,
+  history: ChatTurn[],
+  prompt: string,
+  llmKeys: LlmKeySource | undefined,
+  batchIndex: number
+): Promise<string> {
+  const attempts = 3;
+  let lastError = "empty response";
+  const messages: ChatTurn[] = [...history, { role: "user", content: prompt }];
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const temperature = attempt === 0 ? 0.75 : attempt === 1 ? 0.6 : 0.45;
+      const raw =
+        provider === "gemini"
+          ? await geminiChatCompletion({
+              system,
+              messages: messages as GeminiMessage[],
+              temperature,
+              maxTokens: 16384,
+              json: true,
+              apiKey: llmKeys?.geminiKey ?? undefined,
+              model: llmKeys?.geminiModel ?? undefined,
+            })
+          : await callStoryChatOpenAi(system, messages, llmKeys, temperature);
+
+      if (raw?.trim()) return raw;
+      lastError = `batch ${batchIndex + 1} empty chat response`;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       if (attempt < attempts - 1) {
@@ -476,6 +542,66 @@ async function callStoryLlmOpenAi(
   return response.choices[0]?.message?.content || "";
 }
 
+async function callStoryChatOpenAi(
+  system: string,
+  messages: ChatTurn[],
+  llmKeys?: LlmKeySource,
+  temperature = 0.75
+): Promise<string> {
+  const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
+  if (!openaiKey) throw new Error("OpenAI key not configured");
+
+  const OpenAI = (await import("openai")).default;
+  const openai = new OpenAI({ apiKey: openaiKey });
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: system },
+      ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ],
+    max_tokens: 12000,
+  });
+  return response.choices[0]?.message?.content || "";
+}
+
+function buildBatchPrompt(
+  batch: number,
+  hero: string,
+  userId: string,
+  meta: StoryBatchMeta | null,
+  setting: string,
+  storySoFar: string,
+  start: number,
+  end: number,
+  arcHints: unknown,
+  bfiSlice: unknown
+): string {
+  if (batch === 0) {
+    return `Create the opening of a unique continuous story for "${hero}" (seed: ${userId.slice(0, 8)}).
+Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
+${JSON.stringify(arcHints)}
+
+Map these personality moments in order (same bfiId):
+${JSON.stringify(bfiSlice)}`;
+  }
+
+  return `Continue the SAME story you already started for "${meta?.heroName || hero}" in "${meta?.setting || setting}".
+Recent story: ${storySoFar.slice(-500) || "The journey has begun."}
+
+Return JSON ONLY in this exact shape:
+{"beats":[{"id":${start + 1},"bfiId":...,"trait":"...","chapter":...,"chapterTitle":"...","narrative":"...","question":"...","choices":[{"label":"...","value":5},...],"scenePrompt":"..."}, ... ]}
+
+Exactly ${STORY_BATCH_SIZE} beats with ids ${start + 1} through ${end}. Do NOT include title or prologue again.
+
+Plot spine:
+${JSON.stringify(arcHints)}
+
+Personality moments in order (same bfiId):
+${JSON.stringify(bfiSlice)}`;
+}
+
 function storyModelFor(provider: "gemini" | "openai", llmKeys?: LlmKeySource): string {
   return provider === "gemini"
     ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash"
@@ -498,6 +624,7 @@ async function generateStoryInBatches(
   let partialFill = false;
 
   const systemPrompt = STORY_BATCH_SYSTEM_PROMPT.replaceAll("N", String(STORY_BATCH_SIZE));
+  const chatHistory: ChatTurn[] = [];
 
   for (let batch = 0; batch < STORY_BATCH_COUNT; batch++) {
     if (batch > 0) {
@@ -517,27 +644,29 @@ async function generateStoryInBatches(
       plotHint: m.narrative.slice(0, 120),
     }));
 
-    const prompt =
-      batch === 0
-        ? `Create the opening of a unique continuous story for "${hero}" (seed: ${userId.slice(0, 8)}).
-Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
-${JSON.stringify(arcHints)}
-
-Map these personality moments in order (same bfiId):
-${JSON.stringify(bfiSlice)}`
-        : `Continue the same story for "${meta?.heroName || hero}" in "${meta?.setting || setting}".
-Recent story: ${storySoFar.slice(-400) || "The journey has begun."}
-
-Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
-${JSON.stringify(arcHints)}
-
-Personality moments in order (same bfiId):
-${JSON.stringify(bfiSlice)}`;
+    const prompt = buildBatchPrompt(
+      batch,
+      hero,
+      userId,
+      meta,
+      setting,
+      storySoFar,
+      start,
+      end,
+      arcHints,
+      bfiSlice
+    );
 
     let parsed: Partial<StoryJourney> & { beats?: StoryBeat[] };
+    let raw = "";
     try {
-      const raw = await fetchStoryBatch(provider, systemPrompt, prompt, llmKeys, batch);
+      raw =
+        batch === 0
+          ? await fetchStoryBatchSingle(provider, systemPrompt, prompt, llmKeys, batch)
+          : await fetchStoryBatchChat(provider, systemPrompt, chatHistory, prompt, llmKeys, batch);
       parsed = parseStoryJson(raw);
+      chatHistory.push({ role: "user", content: prompt });
+      chatHistory.push({ role: "assistant", content: raw.slice(0, 12000) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (batch === 0) throw new Error(`Batch 1 failed: ${msg}`);
@@ -570,7 +699,8 @@ ${JSON.stringify(bfiSlice)}`;
     if (filled > 0) {
       partialFill = true;
       if (llmBeats.length === 0) {
-        warnings.push(`Batch ${batch + 1} returned 0/${STORY_BATCH_SIZE} beats; used built-in arc for all`);
+        const hint = raw ? ` response: ${raw.slice(0, 80).replace(/\s+/g, " ")}…` : "";
+        warnings.push(`Batch ${batch + 1} returned 0/${STORY_BATCH_SIZE} beats; used built-in arc for all${hint}`);
       } else {
         warnings.push(
           `Batch ${batch + 1} returned ${llmBeats.length}/${STORY_BATCH_SIZE} beats; filled ${filled} from built-in arc`
