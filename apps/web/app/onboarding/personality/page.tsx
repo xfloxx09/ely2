@@ -111,17 +111,31 @@ function QuotaNotice({ debug }: { debug?: StoryJourney["_debug"] }) {
 
   return (
     <p className="mt-4 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm leading-relaxed text-orange-100/90">
-      Your Gemini API quota is used up (error 429). The built-in story still works — only AI personalization is off
-      until quota resets or you enable billing at{" "}
-      <a
-        href="https://aistudio.google.com/"
-        target="_blank"
-        rel="noreferrer"
-        className="underline text-orange-200"
-      >
-        Google AI Studio
-      </a>
-      .
+      {debug?.storyFailureReason?.includes("limit: 0") || debug?.storyFailureReason?.includes("limit\":0") ? (
+        <>
+          Gemini reports <strong>free tier limit: 0</strong> for this model/key — not that you used it up. Switch Admin
+          model to <strong>gemini-2.5-flash</strong>, use a key from{" "}
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-orange-200">
+            AI Studio
+          </a>
+          , clear any old key (trash icon), save the new one, and link billing on the Google Cloud project (free tier
+          still applies).
+        </>
+      ) : (
+        <>
+          Your Gemini API quota is used up (error 429). The built-in story still works — only AI personalization is off
+          until quota resets or you enable billing at{" "}
+          <a
+            href="https://aistudio.google.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="underline text-orange-200"
+          >
+            Google AI Studio
+          </a>
+          .
+        </>
+      )}
     </p>
   );
 }

@@ -132,7 +132,7 @@ export async function getAdminPlatformSettings(): Promise<AdminPlatformSettingsV
 
   return {
     llmProvider: config.llmProvider || "gemini",
-    geminiModel: config.geminiModel || "gemini-2.0-flash",
+    geminiModel: config.geminiModel || "gemini-2.5-flash",
     activeProvider,
     secrets: {
       GEMINI_API_KEY: secretMeta(config.geminiApiKey, "GEMINI_API_KEY", env.geminiApiKey),

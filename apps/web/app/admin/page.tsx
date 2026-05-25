@@ -25,7 +25,7 @@ export default function AdminPage() {
   const [denyReason, setDenyReason] = useState<string>("");
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [llmProvider, setLlmProvider] = useState("gemini");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.0-flash");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [replicateApiToken, setReplicateApiToken] = useState("");
@@ -56,7 +56,7 @@ export default function AdminPage() {
         setUsers(userList);
         setSettings(platformSettings);
         setLlmProvider(platformSettings.llmProvider || "gemini");
-        setGeminiModel(platformSettings.geminiModel || "gemini-2.0-flash");
+        setGeminiModel(platformSettings.geminiModel || "gemini-2.5-flash");
       })
       .catch((err) => {
         setAuthorized((prev) => {
@@ -196,12 +196,22 @@ export default function AdminPage() {
 
             <label className="block">
               <span className="mb-1.5 block text-sm text-ely-muted">Gemini model</span>
-              <input
+              <select
                 value={geminiModel}
                 onChange={(e) => setGeminiModel(e.target.value)}
-                placeholder="gemini-2.0-flash"
                 className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-ely-primary/50"
-              />
+              >
+                <option value="gemini-2.5-flash">gemini-2.5-flash (recommended free tier)</option>
+                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (highest free RPM)</option>
+                <option value="gemini-2.0-flash">gemini-2.0-flash (legacy — often limit: 0)</option>
+              </select>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-ely-muted">
+                Fresh Google accounts often fail on 2.0-flash with quota limit 0. Use 2.5-flash. Create keys at{" "}
+                <a href="https://aistudio.google.com/apikey" className="text-ely-accent underline" target="_blank" rel="noreferrer">
+                  AI Studio
+                </a>
+                , not Cloud Console. If 429 persists, link billing on the GCP project (free tier still applies).
+              </p>
             </label>
 
             <SecretField

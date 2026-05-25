@@ -346,7 +346,7 @@ async function callStoryLlm(
 
 function storyModelFor(provider: "gemini" | "openai", llmKeys?: LlmKeySource): string {
   return provider === "gemini"
-    ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
+    ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash"
     : "gpt-4o-mini";
 }
 
@@ -363,6 +363,10 @@ async function generateStoryInBatches(
   let storySoFar = "";
 
   for (let batch = 0; batch < 3; batch++) {
+    if (batch > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
     const start = batch * STORY_BATCH_SIZE;
     const end = start + STORY_BATCH_SIZE;
     const bfiSlice = BFI2_SHORT.slice(start, end).map((q) => ({

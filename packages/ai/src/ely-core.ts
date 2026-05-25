@@ -151,7 +151,7 @@ export function parseNexusCommand(message: string): { model: string; provider: s
     "gpt-4o": { model: "gpt-4o", provider: "OPENAI" },
     "gpt-4": { model: "gpt-4", provider: "OPENAI" },
     claude: { model: "claude-3-5-sonnet-20241022", provider: "ANTHROPIC" },
-    gemini: { model: "gemini-2.0-flash", provider: "GOOGLE" },
+    gemini: { model: "gemini-2.5-flash", provider: "GOOGLE" },
     cohere: { model: "command-r-plus", provider: "COHERE" },
   };
 
