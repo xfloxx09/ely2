@@ -52,15 +52,198 @@ function pick<T>(arr: T[], seed: number): T {
   return arr[seed % arr.length]!;
 }
 
-function storyChoiceLabels(question: BFIQuestion): StoryChoice[] {
-  const positive = !question.reverseScored;
-  return [
-    { label: positive ? "This feels deeply true — it's simply who I am" : "Not at all — that's the opposite of me", value: positive ? 5 : 1 },
-    { label: positive ? "Yes, more often than not" : "Rarely, if ever", value: positive ? 4 : 2 },
-    { label: "I'm somewhere in the middle", value: 3 },
-    { label: positive ? "Only in small moments" : "Sometimes, but not really me", value: positive ? 2 : 4 },
-    { label: positive ? "Hardly ever" : "Absolutely — that's me completely", value: positive ? 1 : 5 },
-  ];
+/** Story-flavored answers that still map to standard BFI raw scores (1–5 = agree with statement). */
+export function contextualStoryChoices(
+  question: BFIQuestion,
+  hero: string,
+  variantIndex: number
+): StoryChoice[] {
+  const v = variantIndex % 2;
+  const h = hero;
+
+  type FiveLabels = [string, string, string, string, string];
+  const pack = (labels: FiveLabels): StoryChoice[] =>
+    labels.map((label, i) => ({ label, value: 5 - i }));
+
+  const banks: Record<
+    string,
+    { forward: FiveLabels[]; reverse: FiveLabels[] }
+  > = {
+    extraversion: {
+      forward: [
+        [
+          `${h} steps into the center — the room feels like home`,
+          "More often than not, I seek the pulse of the gathering",
+          "Some evenings I shine, others I need the quiet edge",
+          "I usually watch from the sidelines and listen first",
+          "Crowds drain me — I keep my fire for smaller circles",
+        ],
+        [
+          "My spirit lifts the moment voices rise around me",
+          "I tend to join in and let the moment carry me",
+          "It depends — I can be social or perfectly still",
+          "I prefer listening to leading the room",
+          "Solitude restores me more than company does",
+        ],
+      ],
+      reverse: [
+        [
+          "Yes — silence is my truest language",
+          "I'm usually the quiet one in any room",
+          "I speak when it counts, otherwise I stay still",
+          "People are surprised by how loud I can be",
+          "Quiet isn't me — I naturally fill the space",
+        ],
+        [
+          "Stillness suits me better than the spotlight",
+          "I often hold back and let others take the stage",
+          "I'm social in bursts, not by default",
+          "I find myself talking more than I planned to",
+          "The idea of being 'the quiet one' doesn't fit me at all",
+        ],
+      ],
+    },
+    agreeableness: {
+      forward: [
+        [
+          "My heart moves first — I soften every fall I see",
+          "I usually extend warmth before judgment",
+          "I try to be kind, though I have my limits",
+          "I care, but I don't always show it quickly",
+          "I protect my boundaries — sympathy isn't automatic",
+        ],
+        [
+          "Helping others feels like the obvious choice",
+          "I'm gentle with people more often than not",
+          "I'm fair — sometimes soft, sometimes firm",
+          "I can be distant until someone earns my trust",
+          "I don't easily melt for every stranger's pain",
+        ],
+      ],
+      reverse: [
+        [
+          "I can be sharp — fault-finding comes naturally",
+          "I notice flaws in people before their gifts",
+          "I'm balanced — not harsh, not endlessly soft",
+          "I usually give people the benefit of the doubt",
+          "Finding fault in others isn't who I am",
+        ],
+        [
+          "Conflict doesn't frighten me — I say the hard thing",
+          "I stand my ground even when it ruffles feathers",
+          "I pick my battles, but I don't always yield",
+          "I'd rather harmonize than pick a fight",
+          "Starting arguments is the opposite of my nature",
+        ],
+      ],
+    },
+    conscientiousness: {
+      forward: [
+        [
+          "Every step is planned — order is my compass",
+          "I like a map, a list, a clear next move",
+          "I'm organized when it matters, loose when it doesn't",
+          "Structure helps, but I don't need it for everything",
+          "Plans feel like cages — I trust improvisation",
+        ],
+        [
+          "Reliability is simply who I am on the road",
+          "I follow through more often than I drift",
+          "I'm steady, though not rigid about every detail",
+          "Deadlines slip sometimes — I'm human",
+          "Discipline and I are occasional acquaintances",
+        ],
+      ],
+      reverse: [
+        [
+          "Mess and I are old companions — yes, that's me",
+          "I leave things half-done more than I'd admit",
+          "I'm organized in some corners, chaotic in others",
+          "I usually tidy up and finish what I start",
+          "Disorganized doesn't describe me at all",
+        ],
+        [
+          "I drift — structure rarely sticks for long",
+          "Lazy moments win more often than I wish",
+          "I work in waves, not steady lines",
+          "I'm more dependable than people expect",
+          "Calling me lazy would be completely wrong",
+        ],
+      ],
+    },
+    neuroticism: {
+      forward: [
+        [
+          "The storm inside me is familiar — worry runs deep",
+          "I feel tides of mood and tension often",
+          "Stress visits, but I don't always surrender to it",
+          "I usually find calm after the first surge",
+          "Setbacks rarely shake me — I recover quickly",
+        ],
+        [
+          "Anxiety hums beneath my skin most days",
+          "I tense up when the ground shifts unexpectedly",
+          "I'm sensitive, but not ruled by every fear",
+          "Pressure comes and goes without owning me",
+          "I'm steady inside — turmoil is rare",
+        ],
+      ],
+      reverse: [
+        [
+          "Setbacks flatten me — optimism takes time to return",
+          "I struggle to bounce back when things go wrong",
+          "I recover, but not without a bruise to my spirit",
+          "I usually rise again with reasonable speed",
+          "Optimism after failure is simply how I'm built",
+        ],
+        [
+          "Calm is my baseline, even when skies darken",
+          "Tension rarely takes the wheel for long",
+          "I'm composed most days, shaken on others",
+          "I feel stress more than I show it",
+          "Calling me tense would miss who I really am",
+        ],
+      ],
+    },
+    openness: {
+      forward: [
+        [
+          "Wonder pulls me forward — the strange is welcome",
+          "I chase new ideas, art, and unfamiliar paths",
+          "I'm curious, though I still love what's known",
+          "Novelty intrigues me in small doses",
+          "The familiar ground feels safer than the unknown",
+        ],
+        [
+          "Invention lives in me — I reimagine everything",
+          "I lean into creativity and complex ideas",
+          "I'm open-minded, but not endlessly restless",
+          "I appreciate depth, yet prefer practical ground",
+          "Routine and simplicity suit me better than novelty",
+        ],
+      ],
+      reverse: [
+        [
+          "Art and abstraction barely whisper to me",
+          "I rarely wander into imaginative territory",
+          "Beauty matters, but I don't live for abstract art",
+          "I enjoy creative things more than I expect to",
+          "Few artistic interests? That couldn't be less true",
+        ],
+        [
+          "The practical world holds my attention, not poetry",
+          "I don't often lose myself in artistic daydreams",
+          "I'm curious about some creative things, not all",
+          "Unexpected ideas often catch my interest",
+          "Saying I'm uninterested in art misses who I am",
+        ],
+      ],
+    },
+  };
+
+  const traitBank = banks[question.trait] || banks.openness!;
+  const set = question.reverseScored ? traitBank.reverse : traitBank.forward;
+  return pack(set[v]!);
 }
 
 function narrativeForQuestion(q: BFIQuestion, hero: string, setting: string, idx: number): string {
@@ -137,7 +320,7 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
       chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
       narrative: narrativeForQuestion(q, hero, setting, i),
       question: questionAsStory(q, hero),
-      choices: storyChoiceLabels(q),
+      choices: contextualStoryChoices(q, hero, i),
       scenePrompt: scenePromptFor(q, setting, chapter),
     };
   });
@@ -153,8 +336,44 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
 
 const STORY_SYSTEM_PROMPT = `You create immersive personalized story questionnaires for personality discovery. 
 Return JSON with: title, prologue (2-3 poetic sentences), heroName, setting, beats (array of exactly 30).
-Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, ~3 beats each), chapterTitle, narrative (2 sentences of story prose), question (story-framed, no clinical language), choices (5 options with label and value 1-5 where higher agreement with the trait unless reverseScored), scenePrompt (pencil sketch image description).
-Never mention Big Five or psychology. Make it magical, literary, and unique.`;
+Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, ~3 beats each), chapterTitle, narrative (2 sentences of story prose), question (story-framed, no clinical language), choices (array of exactly 5 UNIQUE options for THIS beat only — each with label and value), scenePrompt (pencil sketch image description).
+
+CRITICAL scoring rules for choices:
+- values must be exactly 5, 4, 3, 2, 1 (each used once)
+- value 5 = strongest agreement with the original BFI statement (even if reverseScored / negative wording like "lazy" or "quiet")
+- value 1 = strongest disagreement with that statement
+- labels must be story actions or feelings tied to THIS beat's question — never reuse generic scales like "agree strongly"
+- Never mention Big Five or psychology. Make it magical, literary, and unique.`;
+
+function normalizeBeatChoices(
+  beat: StoryBeat,
+  question: BFIQuestion,
+  hero: string,
+  index: number
+): StoryChoice[] {
+  const choices = beat.choices;
+  if (choices?.length === 5) {
+    const values = choices.map((c) => c.value).sort((a, b) => a - b);
+    const valid = values.join(",") === "1,2,3,4,5" && choices.every((c) => c.label?.trim());
+    if (valid) {
+      return [...choices].sort((a, b) => b.value - a.value);
+    }
+  }
+  return contextualStoryChoices(question, hero, index);
+}
+
+function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
+  const hero = journey.heroName || "You";
+  const beats = journey.beats.map((beat, index) => {
+    const question = BFI2_SHORT.find((q) => q.id === beat.bfiId);
+    if (!question) return beat;
+    return {
+      ...beat,
+      choices: normalizeBeatChoices(beat, question, hero, index),
+    };
+  });
+  return { ...journey, beats };
+}
 
 export async function generateStoryJourney(
   userId: string,
@@ -209,7 +428,7 @@ Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
 
     const parsed = JSON.parse(raw || "{}") as StoryJourney;
     if (parsed.beats?.length === 30) {
-      return parsed;
+      return hydrateStoryBeats(parsed);
     }
   } catch {
     // fall through
