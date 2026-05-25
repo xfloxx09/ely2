@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getDb, platformSettings } from "@ely/db";
+import { getDb, platformSettings, ensurePlatformSettingsTable } from "@ely/db";
 import { encryptApiKey, decryptApiKey } from "@ely/ai";
 import { resolveLlmProvider, type LlmKeySource } from "@ely/personality";
 
@@ -47,6 +47,7 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
   }
 
   try {
+    await ensurePlatformSettingsTable();
     const db = getDb();
     const rows = await db.select().from(platformSettings);
     const dbValues: Record<string, string> = {};
@@ -99,6 +100,7 @@ export type AdminPlatformSettingsView = {
 };
 
 export async function getAdminPlatformSettings(): Promise<AdminPlatformSettingsView> {
+  await ensurePlatformSettingsTable();
   const db = getDb();
   const rows = await db.select().from(platformSettings);
   const dbMap = new Map(rows.map((r) => [r.key, r]));
@@ -151,6 +153,7 @@ export async function updateAdminPlatformSettings(
     clearKeys?: string[];
   }
 ) {
+  await ensurePlatformSettingsTable();
   const db = getDb();
 
   async function upsert(key: string, value: string, isSecret: boolean) {
