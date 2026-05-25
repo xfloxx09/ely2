@@ -36,6 +36,8 @@ type StoryJourney = {
     storyModel?: string;
     providerResolved?: "gemini" | "openai" | null;
     storyFailureReason?: string;
+    storyPartialFill?: boolean;
+    storyWarnings?: string[];
     sketchConfigured?: { sketchSource: string; sketchModel?: string };
   };
 };
@@ -395,6 +397,12 @@ export default function PersonalityOnboarding() {
                   <span className="text-amber-200/90">Why fallback: {story._debug.storyFailureReason}</span>
                 </>
               ) : null}
+              {story._debug.storyWarnings?.map((w) => (
+                <span key={w}>
+                  <br />
+                  <span className="text-amber-200/80">Note: {w}</span>
+                </span>
+              ))}
             </p>
           )}
 
@@ -472,6 +480,12 @@ export default function PersonalityOnboarding() {
                   <span className="text-amber-200/90">Story fallback: {storyDebug.storyFailureReason}</span>
                 </>
               ) : null}
+              {storyDebug?.storyWarnings?.map((w) => (
+                <span key={w}>
+                  <br />
+                  <span className="text-amber-200/80">Story note: {w}</span>
+                </span>
+              ))}
               {sketchDebug?.sketchFailureReason ? (
                 <>
                   <br />

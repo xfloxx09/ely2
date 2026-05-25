@@ -34,6 +34,8 @@ export type StoryGenerationDebug = {
   storyModel?: string;
   providerResolved?: "gemini" | "openai" | null;
   storyFailureReason?: string;
+  storyPartialFill?: boolean;
+  storyWarnings?: string[];
 };
 
 const SETTINGS = [
@@ -291,15 +293,136 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
   };
 }
 
-const STORY_BATCH_SYSTEM_PROMPT = `You continue ONE continuous story for personality discovery. Return JSON only.
-For batch 1 include: title, prologue (2-3 sentences), heroName, setting, beats (exactly 10 items).
-For batches 2-3 include only: beats (exactly 10 items).
+const STORY_BATCH_SYSTEM_PROMPT = `You continue ONE continuous story for personality discovery. Return compact JSON only.
+Batch 1: title, prologue (2 sentences max), heroName, setting, beats (exactly N items).
+Later batches: beats array only (exactly N items).
 
-Each beat: id, bfiId, trait, chapter (1-10), chapterTitle, narrative (2 sentences), question, choices (5 with label+value), scenePrompt.
-Choice values must be exactly 5,4,3,2,1 once each. Labels are story actions for THIS beat only.
-Never mention Big Five or psychology.`;
+Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE short sentence), question (one line), choices (5 with label+value), scenePrompt (brief, no text in image).
+Choice values must be 5,4,3,2,1 once each. Keep labels under 12 words.
+Never mention Big Five or psychology. Output valid complete JSON.`;
 
-const STORY_BATCH_SIZE = 10;
+const STORY_BATCH_SIZE = 5;
+const STORY_BATCH_COUNT = 6;
+
+function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBeat[] } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { beats: [] };
+  try {
+    return JSON.parse(trimmed) as Partial<StoryJourney> & { beats?: StoryBeat[] };
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(match[0]) as Partial<StoryJourney> & { beats?: StoryBeat[] };
+    }
+    throw new Error(`Invalid story JSON (${trimmed.slice(0, 120)}…)`);
+  }
+}
+
+function buildBeatFromArc(globalIndex: number, hero: string, setting: string, arc: ReturnType<typeof buildContinuousArc>): StoryBeat {
+  const q = BFI2_SHORT[globalIndex]!;
+  const moment = arc[globalIndex]!;
+  const chapter = Math.floor(globalIndex / 3) + 1;
+  return {
+    id: globalIndex + 1,
+    bfiId: q.id,
+    trait: q.trait,
+    chapter,
+    chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
+    narrative: moment.narrative,
+    question: moment.question,
+    choices: contextualStoryChoices(q, hero, globalIndex),
+    scenePrompt: scenePromptFromArc(setting, chapter, moment.sceneDetail),
+  };
+}
+
+function mergeBatchBeats(
+  start: number,
+  llmBeats: StoryBeat[],
+  hero: string,
+  setting: string,
+  arc: ReturnType<typeof buildContinuousArc>
+): { beats: StoryBeat[]; filled: number } {
+  const result: StoryBeat[] = [];
+  let filled = 0;
+
+  for (let i = 0; i < STORY_BATCH_SIZE; i++) {
+    const globalIndex = start + i;
+    const q = BFI2_SHORT[globalIndex];
+    if (!q) continue;
+
+    const byBfi = llmBeats.find((b) => b.bfiId === q.id);
+    const byIndex = llmBeats[i];
+    const candidate = byBfi || byIndex;
+    const chapter = Math.floor(globalIndex / 3) + 1;
+
+    if (
+      candidate?.narrative &&
+      candidate.narrative.length > 30 &&
+      !candidate.narrative.includes("world seems to pause")
+    ) {
+      result.push({
+        ...candidate,
+        id: globalIndex + 1,
+        bfiId: q.id,
+        trait: q.trait,
+        chapter: candidate.chapter || chapter,
+        chapterTitle: candidate.chapterTitle || CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
+        choices:
+          candidate.choices?.length === 5
+            ? candidate.choices
+            : contextualStoryChoices(q, hero, globalIndex),
+        scenePrompt:
+          candidate.scenePrompt && candidate.scenePrompt.length > 10
+            ? candidate.scenePrompt
+            : scenePromptFromArc(setting, chapter, arc[globalIndex]!.sceneDetail),
+      });
+    } else {
+      result.push(buildBeatFromArc(globalIndex, hero, setting, arc));
+      filled++;
+    }
+  }
+
+  return { beats: result, filled };
+}
+
+async function fetchStoryBatch(
+  provider: "gemini" | "openai",
+  system: string,
+  prompt: string,
+  llmKeys: LlmKeySource | undefined,
+  batchIndex: number
+): Promise<string> {
+  const attempts = 3;
+  let lastError = "empty response";
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const temperature = attempt === 0 ? 0.85 : attempt === 1 ? 0.65 : 0.45;
+      const raw =
+        provider === "gemini"
+          ? await geminiGenerateText({
+              system,
+              prompt,
+              temperature,
+              maxTokens: 16384,
+              json: true,
+              apiKey: llmKeys?.geminiKey ?? undefined,
+              model: llmKeys?.geminiModel ?? undefined,
+            })
+          : await callStoryLlmOpenAi(system, prompt, llmKeys, temperature);
+
+      if (raw?.trim()) return raw;
+      lastError = `batch ${batchIndex + 1} empty response`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw new Error(lastError);
+}
 
 type StoryBatchMeta = {
   title: string;
@@ -319,13 +442,22 @@ async function callStoryLlm(
       system,
       prompt,
       temperature: 0.85,
-      maxTokens: 8192,
+      maxTokens: 16384,
       json: true,
       apiKey: llmKeys?.geminiKey ?? undefined,
       model: llmKeys?.geminiModel ?? undefined,
     });
   }
 
+  return callStoryLlmOpenAi(system, prompt, llmKeys, 0.85);
+}
+
+async function callStoryLlmOpenAi(
+  system: string,
+  prompt: string,
+  llmKeys?: LlmKeySource,
+  temperature = 0.85
+): Promise<string> {
   const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
   if (!openaiKey) throw new Error("OpenAI key not configured");
 
@@ -333,13 +465,13 @@ async function callStoryLlm(
   const openai = new OpenAI({ apiKey: openaiKey });
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.85,
+    temperature,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: system },
       { role: "user", content: prompt },
     ],
-    max_tokens: 8000,
+    max_tokens: 12000,
   });
   return response.choices[0]?.message?.content || "";
 }
@@ -355,14 +487,19 @@ async function generateStoryInBatches(
   userName: string | undefined,
   provider: "gemini" | "openai",
   llmKeys?: LlmKeySource
-): Promise<StoryJourney | null> {
+): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean } | null> {
   const hero = userName || "Traveler";
-  const arc = buildContinuousArc(hero, pick(SETTINGS, userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0)));
+  const setting = pick(SETTINGS, userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0));
+  const arc = buildContinuousArc(hero, setting);
   let meta: StoryBatchMeta | null = null;
   const allBeats: StoryBeat[] = [];
   let storySoFar = "";
+  const warnings: string[] = [];
+  let partialFill = false;
 
-  for (let batch = 0; batch < 3; batch++) {
+  const systemPrompt = STORY_BATCH_SYSTEM_PROMPT.replaceAll("N", String(STORY_BATCH_SIZE));
+
+  for (let batch = 0; batch < STORY_BATCH_COUNT; batch++) {
     if (batch > 0) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -373,54 +510,77 @@ async function generateStoryInBatches(
       id: q.id,
       trait: q.trait,
       reverseScored: q.reverseScored,
-      original: q.text,
     }));
     const arcHints = arc.slice(start, end).map((m, i) => ({
       beat: start + i + 1,
       bfiId: BFI2_SHORT[start + i]?.id,
-      plotHint: m.narrative,
+      plotHint: m.narrative.slice(0, 120),
     }));
 
     const prompt =
       batch === 0
         ? `Create the opening of a unique continuous story for "${hero}" (seed: ${userId.slice(0, 8)}).
-Return beats 1-10 only. Use this plot spine:
+Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
 ${JSON.stringify(arcHints)}
 
-Personality moments to map (same order, same bfiId):
+Map these personality moments in order (same bfiId):
 ${JSON.stringify(bfiSlice)}`
-        : `Continue the same story for "${meta?.heroName || hero}" in "${meta?.setting || "a magical realm"}".
-Story so far (last moments): ${storySoFar.slice(-600) || "The journey has begun."}
+        : `Continue the same story for "${meta?.heroName || hero}" in "${meta?.setting || setting}".
+Recent story: ${storySoFar.slice(-400) || "The journey has begun."}
 
-Return beats ${start + 1}-${end} only. Plot spine for this section:
+Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}). Plot spine:
 ${JSON.stringify(arcHints)}
 
-Personality moments (same order, same bfiId):
+Personality moments in order (same bfiId):
 ${JSON.stringify(bfiSlice)}`;
 
-    const raw = await callStoryLlm(provider, STORY_BATCH_SYSTEM_PROMPT, prompt, llmKeys);
-    const parsed = JSON.parse(raw || "{}") as StoryJourney & { beats?: StoryBeat[] };
+    let parsed: Partial<StoryJourney> & { beats?: StoryBeat[] };
+    try {
+      const raw = await fetchStoryBatch(provider, systemPrompt, prompt, llmKeys, batch);
+      parsed = parseStoryJson(raw);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (batch === 0) throw new Error(`Batch 1 failed: ${msg}`);
+      warnings.push(`Batch ${batch + 1} LLM failed (${msg}); filled from built-in arc`);
+      parsed = { beats: [] };
+      partialFill = true;
+    }
 
     if (batch === 0) {
-      if (!parsed.title || !parsed.prologue || !parsed.beats?.length) {
-        throw new Error(`Batch 1 missing fields (got ${parsed.beats?.length ?? 0} beats)`);
+      if (!parsed.title || !parsed.prologue) {
+        throw new Error(`Batch 1 missing title/prologue (got ${parsed.beats?.length ?? 0} beats)`);
       }
       meta = {
         title: parsed.title,
         prologue: parsed.prologue,
         heroName: parsed.heroName || hero,
-        setting: parsed.setting || pick(SETTINGS, 0),
+        setting: parsed.setting || setting,
       };
     }
 
-    const batchBeats = parsed.beats ?? [];
-    if (batchBeats.length < STORY_BATCH_SIZE) {
-      throw new Error(`Batch ${batch + 1} returned ${batchBeats.length}/10 beats (likely truncated)`);
+    const llmBeats = parsed.beats ?? [];
+    const { beats: merged, filled } = mergeBatchBeats(
+      start,
+      llmBeats,
+      meta?.heroName || hero,
+      meta?.setting || setting,
+      arc
+    );
+
+    if (filled > 0) {
+      partialFill = true;
+      if (llmBeats.length === 0) {
+        warnings.push(`Batch ${batch + 1} returned 0/${STORY_BATCH_SIZE} beats; used built-in arc for all`);
+      } else {
+        warnings.push(
+          `Batch ${batch + 1} returned ${llmBeats.length}/${STORY_BATCH_SIZE} beats; filled ${filled} from built-in arc`
+        );
+      }
     }
 
-    allBeats.push(...batchBeats.slice(0, STORY_BATCH_SIZE));
+    allBeats.push(...merged);
     storySoFar = allBeats
-      .slice(-3)
+      .slice(-2)
       .map((b) => b.narrative)
       .join(" ");
   }
@@ -429,13 +589,17 @@ ${JSON.stringify(bfiSlice)}`;
     throw new Error(`Expected 30 beats, got ${allBeats.length}`);
   }
 
-  return hydrateStoryBeats({
-    title: meta.title,
-    prologue: meta.prologue,
-    heroName: meta.heroName,
-    setting: meta.setting,
-    beats: allBeats,
-  });
+  return {
+    journey: hydrateStoryBeats({
+      title: meta.title,
+      prologue: meta.prologue,
+      heroName: meta.heroName,
+      setting: meta.setting,
+      beats: allBeats,
+    }),
+    warnings,
+    partialFill,
+  };
 }
 
 function normalizeBeatChoices(
@@ -519,11 +683,17 @@ export async function generateStoryJourney(
   for (const provider of providerChain) {
     const storyModel = storyModelFor(provider, llmKeys);
     try {
-      const journey = await generateStoryInBatches(userId, userName, provider, llmKeys);
-      if (journey) {
+      const result = await generateStoryInBatches(userId, userName, provider, llmKeys);
+      if (result) {
         return {
-          ...journey,
-          _debug: { storySource: provider, storyModel, providerResolved },
+          ...result.journey,
+          _debug: {
+            storySource: provider,
+            storyModel,
+            providerResolved,
+            storyPartialFill: result.partialFill,
+            storyWarnings: result.warnings.length ? result.warnings : undefined,
+          },
         };
       }
     } catch (err) {
