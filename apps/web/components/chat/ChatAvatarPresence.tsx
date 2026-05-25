@@ -10,7 +10,7 @@ type FaceProps = {
   imageUrl: string | null;
   name?: string;
   emotion: AvatarEmotion;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   className?: string;
 };
 
@@ -18,6 +18,7 @@ const sizeClasses = {
   sm: "h-10 w-10 rounded-xl border",
   md: "h-14 w-14 rounded-2xl border-2",
   lg: "h-24 w-24 rounded-3xl border-2 sm:h-28 sm:w-28",
+  xl: "h-36 w-36 rounded-3xl border-2 sm:h-44 sm:w-44",
 };
 
 export function ChatAvatarFace({ imageUrl, name = "ELY", emotion, size = "md", className }: FaceProps) {
@@ -50,7 +51,7 @@ export function ChatAvatarFace({ imageUrl, name = "ELY", emotion, size = "md", c
           <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-ely-primary to-ely-secondary">
-            <Sparkles size={size === "sm" ? 16 : size === "md" ? 22 : 32} className="text-white/90" />
+            <Sparkles size={size === "sm" ? 16 : size === "md" ? 22 : size === "lg" ? 32 : 36} className="text-white/90" />
           </div>
         )}
 
@@ -73,9 +74,10 @@ type Props = {
   className?: string;
   showEdit?: boolean;
   compact?: boolean;
+  expanded?: boolean;
 };
 
-/** Inline chat header or empty-state hero — not a sidebar column. */
+/** Inline chat header, empty-state hero, or expanded left panel. */
 export function ChatAvatarPresence({
   imageUrl,
   name = "ELY",
@@ -83,8 +85,30 @@ export function ChatAvatarPresence({
   className,
   showEdit = true,
   compact = false,
+  expanded = false,
 }: Props) {
   const status = emotion === "idle" ? "online" : emotion;
+
+  if (expanded) {
+    return (
+      <div className={cn("relative flex flex-col items-center", className)}>
+        {showEdit && (
+          <Link
+            href="/boutique"
+            className="absolute -right-1 -top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-ely-primary/30 hover:text-white"
+            title="Edit avatar in boutique"
+          >
+            <Pencil size={14} />
+          </Link>
+        )}
+
+        <ChatAvatarFace imageUrl={imageUrl} name={name} emotion={emotion} size="xl" />
+
+        <p className="mt-4 text-sm font-medium text-white">{name}</p>
+        <p className="text-[11px] capitalize text-ely-muted">{status}</p>
+      </div>
+    );
+  }
 
   if (compact) {
     return (
