@@ -1,0 +1,255 @@
+import { eq } from "drizzle-orm";
+import { getDb, users, subscriptions, elyCredits, creditTransactions, affiliates } from "@ely/db";
+import { BFI2_SHORT, BFI2_LONG } from "@ely/personality";
+import {
+  registerUser,
+  loginUser,
+  getUserById,
+  submitPersonalityTest,
+  getPersonalityProfile,
+  getOrCreateConversation,
+  getConversationMessages,
+  getAffiliateDashboard,
+  enrollUserAsAffiliate,
+  getGamificationStats,
+  getAvatarBoutique,
+  getUserAvatar,
+  saveApiKey,
+  getIncomeDisclosures,
+  generateUserAvatar,
+} from "./services.js";
+import {
+  createCheckoutSession,
+  createCreditCheckout,
+  createPortalSession,
+  createConnectAccount,
+  createConnectOnboardingLink,
+  STRIPE_PRICES,
+  CREDIT_PACKS,
+  getStripe,
+} from "./stripe.js";
+import { createSession, getSessionUser, getAuthToken, getAppUrl } from "./session.js";
+import { handleChatMessage } from "./chat-handler.js";
+
+type ApiRequest = {
+  method: string;
+  path: string;
+  body?: unknown;
+  authHeader?: string | null;
+};
+
+const PUBLIC_PATHS = [
+  "/health",
+  "/auth/register",
+  "/auth/login",
+  "/personality/questions",
+  "/legal/income-disclosure",
+];
+
+export async function handleApiRequest(req: ApiRequest): Promise<{ status: number; body: unknown }> {
+  const { method, path, body, authHeader } = req;
+  const token = getAuthToken(authHeader ?? null);
+  const userId = getSessionUser(token);
+  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "?"));
+
+  if (!isPublic && !path.startsWith("/webhooks") && !userId) {
+    return { status: 401, body: { error: "Unauthorized" } };
+  }
+
+  const appUrl = getAppUrl();
+
+  try {
+    if (method === "GET" && path === "/health") {
+      return { status: 200, body: { status: "ok", service: "ely-api" } };
+    }
+
+    if (method === "POST" && path === "/auth/register") {
+      const { email, password, name, referralCode } = body as {
+        email: string;
+        password: string;
+        name?: string;
+        referralCode?: string;
+      };
+      const user = await registerUser(email, password, name, referralCode);
+      const sessionToken = createSession(user.id);
+      return { status: 200, body: { user, token: sessionToken } };
+    }
+
+    if (method === "POST" && path === "/auth/login") {
+      const { email, password } = body as { email: string; password: string };
+      const user = await loginUser(email, password);
+      const sessionToken = createSession(user.id);
+      return { status: 200, body: { user, token: sessionToken } };
+    }
+
+    if (method === "GET" && path === "/auth/me") {
+      const user = await getUserById(userId!);
+      return { status: 200, body: { user } };
+    }
+
+    if (method === "GET" && path.startsWith("/personality/questions")) {
+      const type = path.includes("type=long") ? "long" : "short";
+      return { status: 200, body: { questions: type === "long" ? BFI2_LONG : BFI2_SHORT } };
+    }
+
+    if (method === "POST" && path === "/personality/submit") {
+      const { responses, formType } = body as { responses: Record<number, number>; formType: "short" | "long" };
+      const result = await submitPersonalityTest(userId!, responses, formType);
+      return { status: 200, body: result };
+    }
+
+    if (method === "GET" && path === "/personality/profile") {
+      return { status: 200, body: await getPersonalityProfile(userId!) };
+    }
+
+    if (method === "GET" && path === "/avatar") {
+      return { status: 200, body: await getUserAvatar(userId!) };
+    }
+
+    if (method === "POST" && path === "/avatar/generate") {
+      const user = await getUserById(userId!);
+      if (user?.tier !== "PRO") return { status: 403, body: { error: "Pro subscription required" } };
+      const avatar = await generateUserAvatar(userId!);
+      return { status: 200, body: { avatar } };
+    }
+
+    if (method === "GET" && path === "/avatar/boutique") {
+      return { status: 200, body: await getAvatarBoutique(userId!) };
+    }
+
+    if (method === "GET" && path === "/chat/conversation") {
+      const conv = await getOrCreateConversation(userId!);
+      const msgs = await getConversationMessages(conv.id);
+      return { status: 200, body: { conversation: conv, messages: msgs } };
+    }
+
+    if (method === "POST" && path === "/chat/message") {
+      const { content } = body as { content: string };
+      const result = await handleChatMessage(userId!, content);
+      return { status: 200, body: result };
+    }
+
+    if (method === "GET" && path === "/gamification/stats") {
+      return { status: 200, body: await getGamificationStats(userId!) };
+    }
+
+    if (method === "GET" && path === "/affiliate/dashboard") {
+      return { status: 200, body: await getAffiliateDashboard(userId!) };
+    }
+
+    if (method === "POST" && path === "/affiliate/enroll") {
+      const affiliate = await enrollUserAsAffiliate(userId!);
+      return { status: 200, body: { affiliate } };
+    }
+
+    if (method === "POST" && path === "/affiliate/connect") {
+      const user = await getUserById(userId!);
+      if (!user) return { status: 404, body: { error: "User not found" } };
+      const db = getDb();
+      const [affiliate] = await db.select().from(affiliates).where(eq(affiliates.userId, userId!)).limit(1);
+      if (!affiliate) return { status: 400, body: { error: "Not enrolled as affiliate" } };
+      let accountId = affiliate.stripeConnectId;
+      if (!accountId) {
+        const account = await createConnectAccount(user.email);
+        accountId = account.id;
+        await db.update(affiliates).set({ stripeConnectId: accountId }).where(eq(affiliates.id, affiliate.id));
+      }
+      const link = await createConnectOnboardingLink(
+        accountId,
+        `${appUrl}/affiliate?refresh=true`,
+        `${appUrl}/affiliate?connected=true`
+      );
+      return { status: 200, body: { url: link.url } };
+    }
+
+    if (method === "POST" && path === "/billing/checkout") {
+      const { tier, interval } = body as { tier: string; interval: string };
+      const user = await getUserById(userId!);
+      if (!user) return { status: 404, body: { error: "User not found" } };
+      let priceId = STRIPE_PRICES.PLUS_MONTHLY;
+      if (tier === "PLUS" && interval === "annual") priceId = STRIPE_PRICES.PLUS_ANNUAL;
+      if (tier === "PRO") priceId = STRIPE_PRICES.PRO_MONTHLY;
+      const session = await createCheckoutSession(userId!, user.email, priceId, `${appUrl}/billing/success`, `${appUrl}/pricing`);
+      return { status: 200, body: { url: session.url } };
+    }
+
+    if (method === "POST" && path === "/billing/credits") {
+      const { packId } = body as { packId: string };
+      const user = await getUserById(userId!);
+      if (!user) return { status: 404, body: { error: "User not found" } };
+      const session = await createCreditCheckout(userId!, user.email, packId, `${appUrl}/billing/success`, `${appUrl}/settings`);
+      return { status: 200, body: { url: session.url } };
+    }
+
+    if (method === "POST" && path === "/billing/portal") {
+      const user = await getUserById(userId!);
+      if (!user?.stripeCustomerId) return { status: 400, body: { error: "No subscription" } };
+      const session = await createPortalSession(user.stripeCustomerId, `${appUrl}/settings`);
+      return { status: 200, body: { url: session.url } };
+    }
+
+    if (method === "GET" && path === "/billing/credit-packs") {
+      return { status: 200, body: { packs: CREDIT_PACKS } };
+    }
+
+    if (method === "POST" && path === "/nexus/keys") {
+      const { provider, key, label } = body as {
+        provider: "OPENAI" | "ANTHROPIC" | "GOOGLE" | "COHERE";
+        key: string;
+        label?: string;
+      };
+      await saveApiKey(userId!, provider, key, label);
+      return { status: 200, body: { success: true } };
+    }
+
+    if (method === "GET" && path === "/legal/income-disclosure") {
+      return { status: 200, body: await getIncomeDisclosures() };
+    }
+
+    if (method === "GET" && path === "/admin/users") {
+      const user = await getUserById(userId!);
+      if (user?.role !== "ADMIN") return { status: 403, body: { error: "Forbidden" } };
+      const db = getDb();
+      return { status: 200, body: await db.select().from(users).limit(100) };
+    }
+
+    if (method === "POST" && path === "/webhooks/stripe") {
+      const sig = (body as { stripeSignature?: string }).stripeSignature;
+      const rawBody = (body as { rawBody?: string }).rawBody;
+      const s = getStripe();
+      const event = s.webhooks.constructEvent(rawBody || "{}", sig || "", process.env.STRIPE_WEBHOOK_SECRET || "");
+      const db = getDb();
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as { metadata?: Record<string, string>; mode?: string; subscription?: string; payment_intent?: string };
+        const uid = session.metadata?.userId;
+        if (session.mode === "subscription" && uid) {
+          const tier = session.metadata?.tier || "PLUS";
+          await db.insert(subscriptions).values({
+            userId: uid,
+            stripeSubscriptionId: session.subscription as string,
+            tier: tier as "PLUS" | "PRO",
+            status: "ACTIVE",
+            firstPaymentAt: new Date(),
+          }).onConflictDoUpdate({
+            target: subscriptions.userId,
+            set: { tier: tier as "PLUS" | "PRO", status: "ACTIVE", updatedAt: new Date() },
+          });
+          await db.update(users).set({ tier: tier as "FREE" | "PLUS" | "PRO" }).where(eq(users.id, uid));
+          if (tier === "PLUS") {
+            await db.insert(elyCredits).values({ userId: uid, balance: 100, monthlyAllowance: 100 }).onConflictDoUpdate({
+              target: elyCredits.userId,
+              set: { balance: 100, monthlyAllowance: 100 },
+            });
+          }
+        }
+      }
+      return { status: 200, body: { received: true } };
+    }
+
+    return { status: 404, body: { error: "Not found" } };
+  } catch (err) {
+    const message = (err as Error).message || "Internal error";
+    const status = message === "Invalid credentials" ? 401 : message.includes("required") ? 400 : 500;
+    return { status, body: { error: message } };
+  }
+}

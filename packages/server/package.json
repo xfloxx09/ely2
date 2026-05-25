@@ -1,0 +1,28 @@
+{
+  "name": "@ely/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./router": "./src/router.ts",
+    "./session": "./src/session.ts",
+    "./chat": "./src/chat-handler.ts"
+  },
+  "dependencies": {
+    "@ely/db": "workspace:*",
+    "@ely/personality": "workspace:*",
+    "@ely/ai": "workspace:*",
+    "@ely/mlm": "workspace:*",
+    "@ely/gamification": "workspace:*",
+    "@ely/chat": "workspace:*",
+    "bcryptjs": "^2.4.3",
+    "nanoid": "^5.0.9",
+    "stripe": "^17.5.0",
+    "drizzle-orm": "^0.38.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.7.2"
+  }
+}

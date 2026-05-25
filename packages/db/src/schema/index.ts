@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const tierEnum = pgEnum("tier", ["FREE", "PLUS", "PRO"]);
@@ -297,7 +298,7 @@ export const affiliates = pgTable("affiliates", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" })
     .unique(),
-  sponsorId: uuid("sponsor_id").references(() => affiliates.id),
+  sponsorId: uuid("sponsor_id").references((): AnyPgColumn => affiliates.id),
   rank: rankEnum("rank").notNull().default("EXPLORER"),
   isActive: boolean("is_active").notNull().default(true),
   stripeConnectId: text("stripe_connect_id"),

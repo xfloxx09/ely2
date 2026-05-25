@@ -75,6 +75,9 @@ importers:
       '@ely/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ely/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
@@ -232,6 +235,9 @@ importers:
       '@ely/gamification':
         specifier: workspace:*
         version: link:../gamification
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
     devDependencies:
       typescript:
         specifier: ^5.7.2
@@ -273,6 +279,9 @@ importers:
       '@ely/db':
         specifier: workspace:*
         version: link:../db
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -286,6 +295,9 @@ importers:
       '@ely/db':
         specifier: workspace:*
         version: link:../db
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -303,6 +315,46 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.19
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/server:
+    dependencies:
+      '@ely/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@ely/chat':
+        specifier: workspace:*
+        version: link:../chat
+      '@ely/db':
+        specifier: workspace:*
+        version: link:../db
+      '@ely/gamification':
+        specifier: workspace:*
+        version: link:../gamification
+      '@ely/mlm':
+        specifier: workspace:*
+        version: link:../mlm
+      '@ely/personality':
+        specifier: workspace:*
+        version: link:../personality
+      bcryptjs:
+        specifier: ^2.4.3
+        version: 2.4.3
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
+      nanoid:
+        specifier: ^5.0.9
+        version: 5.1.11
+      stripe:
+        specifier: ^17.5.0
+        version: 17.7.0
+    devDependencies:
+      '@types/bcryptjs':
+        specifier: ^2.4.6
+        version: 2.4.6
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

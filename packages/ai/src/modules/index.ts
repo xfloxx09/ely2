@@ -1,5 +1,5 @@
 import type { CommunicationProfile } from "@ely/personality";
-import { completeElyCore, buildSystemPrompt } from "./ely-core.js";
+import { completeElyCore, buildSystemPrompt } from "../ely-core.js";
 
 export type ModuleContext = {
   userId: string;

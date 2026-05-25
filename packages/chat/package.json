@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@ely/db": "workspace:*",
-    "@ely/gamification": "workspace:*"
+    "@ely/gamification": "workspace:*",
+    "drizzle-orm": "^0.38.3"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

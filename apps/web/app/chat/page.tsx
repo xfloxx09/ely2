@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 import { Send, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { WS_URL, apiFetch } from "@/lib/utils";
+import { getWsUrl, apiFetch } from "@/lib/utils";
 
 type Message = {
   id?: string;
@@ -21,27 +21,47 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState("");
   const [avatarState, setAvatarState] = useState("idle");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  const useHttpRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("ely_user") || "{}");
-    setUserId(user.id);
 
     apiFetch("/avatar").then((data) => {
       if (data?.imageUrl) setAvatarUrl(data.imageUrl);
     }).catch(() => {});
 
-    const socket = io(WS_URL, { transports: ["websocket", "polling"] });
+    apiFetch("/chat/conversation").then((data) => {
+      if (data?.messages?.length) {
+        setMessages(data.messages);
+      }
+    }).catch(() => {});
+
+    const wsUrl = getWsUrl();
+    if (!wsUrl) {
+      useHttpRef.current = true;
+      return;
+    }
+
+    const socket = io(wsUrl, {
+      transports: ["websocket", "polling"],
+      timeout: 8000,
+    });
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      useHttpRef.current = false;
       socket.emit("join", { userId: user.id });
     });
 
+    socket.on("connect_error", () => {
+      useHttpRef.current = true;
+    });
+
     socket.on("history", (history: Message[]) => {
-      setMessages(history);
+      if (history.length) setMessages(history);
     });
 
     socket.on("stream", ({ chunk }: { chunk: string }) => {
@@ -51,10 +71,17 @@ export default function ChatPage() {
     socket.on("done", ({ content }: { content: string }) => {
       setMessages((prev) => [...prev, { role: "ASSISTANT", content }]);
       setStreaming("");
+      setAvatarState("idle");
+      setSending(false);
     });
 
     socket.on("avatar_state", ({ state }: { state: string }) => {
       setAvatarState(state);
+    });
+
+    socket.on("error", () => {
+      setSending(false);
+      setAvatarState("idle");
     });
 
     return () => { socket.disconnect(); };
@@ -64,18 +91,46 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
+  async function sendViaHttp(content: string) {
+    setAvatarState("thinking");
+    setSending(true);
+    try {
+      const result = await apiFetch("/chat/message", {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      setMessages((prev) => [...prev, { role: "ASSISTANT", content: result.content, modelUsed: result.model }]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "ASSISTANT", content: `Sorry, I couldn't respond: ${(err as Error).message}` },
+      ]);
+    } finally {
+      setAvatarState("idle");
+      setSending(false);
+    }
+  }
+
   function sendMessage() {
-    if (!input.trim() || !socketRef.current) return;
-    setMessages((prev) => [...prev, { role: "USER", content: input }]);
-    socketRef.current.emit("message", { content: input });
+    if (!input.trim() || sending) return;
+    const content = input.trim();
+    setMessages((prev) => [...prev, { role: "USER", content }]);
     setInput("");
     setStreaming("");
+
+    if (useHttpRef.current || !socketRef.current?.connected) {
+      sendViaHttp(content);
+      return;
+    }
+
+    setSending(true);
+    setAvatarState("thinking");
+    socketRef.current.emit("message", { content });
   }
 
   return (
     <AppShell>
       <div className="flex flex-col h-[calc(100vh-4rem)] md:h-[calc(100vh-2rem)]">
-        {/* Avatar header */}
         <div className="flex items-center gap-4 p-4 border-b border-ely-border">
           <div className={`relative w-12 h-12 rounded-full overflow-hidden bg-ely-card ${avatarState === "thinking" ? "animate-pulse" : ""}`}>
             {avatarUrl ? (
@@ -85,9 +140,6 @@ export default function ChatPage() {
                 <Sparkles size={20} />
               </div>
             )}
-            {avatarState === "thinking" && (
-              <div className="absolute inset-0 bg-ely-primary/20 animate-pulse" />
-            )}
           </div>
           <div>
             <h2 className="font-semibold">ELY</h2>
@@ -95,8 +147,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Module chips */}
-        <div className="flex gap-2 px-4 py-2 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-2 px-4 py-2 overflow-x-auto">
           {MODULES.map((m) => (
             <button
               key={m}
@@ -108,7 +159,6 @@ export default function ChatPage() {
           ))}
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && !streaming && (
             <div className="text-center py-12">
@@ -118,15 +168,10 @@ export default function ChatPage() {
             </div>
           )}
           {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${msg.role === "USER" ? "justify-end" : "justify-start"}`}
-            >
+            <div key={i} className={`flex ${msg.role === "USER" ? "justify-end" : "justify-start"}`}>
               <div
                 className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "USER"
-                    ? "bg-ely-primary text-white rounded-br-md"
-                    : "glass rounded-bl-md"
+                  msg.role === "USER" ? "bg-ely-primary text-white rounded-br-md" : "glass rounded-bl-md"
                 }`}
               >
                 {msg.content}
@@ -144,7 +189,6 @@ export default function ChatPage() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
         <div className="p-4 border-t border-ely-border safe-bottom">
           <div className="flex gap-2 max-w-3xl mx-auto">
             <input
@@ -153,10 +197,11 @@ export default function ChatPage() {
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
               placeholder="Message ELY... (/gpt-4o, /claude, /gemini)"
               className="flex-1 px-4 py-3 rounded-full bg-ely-card border border-ely-border focus:border-ely-primary outline-none min-h-[44px] text-sm"
+              disabled={sending}
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim()}
+              disabled={!input.trim() || sending}
               className="w-11 h-11 rounded-full bg-ely-primary flex items-center justify-center disabled:opacity-50 min-h-[44px] min-w-[44px]"
             >
               <Send size={18} />

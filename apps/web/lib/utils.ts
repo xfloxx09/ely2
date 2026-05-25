@@ -5,12 +5,27 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3002";
+function resolveApiUrl(): string {
+  if (typeof window === "undefined") {
+    return process.env.NEXT_PUBLIC_API_URL || "/api";
+  }
+  return process.env.NEXT_PUBLIC_API_URL || `${window.location.origin}/api`;
+}
+
+export function getApiUrl(): string {
+  const url = resolveApiUrl();
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+export function getWsUrl(): string | null {
+  const ws = process.env.NEXT_PUBLIC_WS_URL;
+  if (!ws || ws === "disabled" || ws === "false") return null;
+  return ws;
+}
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const token = typeof window !== "undefined" ? localStorage.getItem("ely_token") : null;
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${getApiUrl()}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
