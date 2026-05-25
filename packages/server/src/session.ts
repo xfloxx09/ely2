@@ -1,19 +1,45 @@
-const sessions = new Map<string, { userId: string; expires: number }>();
+import { eq } from "drizzle-orm";
+import { getDb, sessions } from "@ely/db";
 
-export function createSession(userId: string): string {
+const SESSION_TTL_MS = 7 * 86400000;
+
+export async function createSession(userId: string): Promise<string> {
   const token = crypto.randomUUID();
-  sessions.set(token, { userId, expires: Date.now() + 7 * 86400000 });
+  const expires = new Date(Date.now() + SESSION_TTL_MS);
+  const db = getDb();
+
+  await db.insert(sessions).values({
+    sessionToken: token,
+    userId,
+    expires,
+  });
+
   return token;
 }
 
-export function getSessionUser(token: string | undefined | null): string | null {
+export async function getSessionUser(token: string | undefined | null): Promise<string | null> {
   if (!token) return null;
-  const session = sessions.get(token);
-  if (!session || session.expires < Date.now()) {
-    sessions.delete(token);
+
+  const db = getDb();
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.sessionToken, token))
+    .limit(1);
+
+  if (!session) return null;
+
+  if (session.expires < new Date()) {
+    await db.delete(sessions).where(eq(sessions.sessionToken, token));
     return null;
   }
+
   return session.userId;
+}
+
+export async function deleteSession(token: string): Promise<void> {
+  const db = getDb();
+  await db.delete(sessions).where(eq(sessions.sessionToken, token));
 }
 
 export function getAuthToken(authHeader: string | null): string | null {

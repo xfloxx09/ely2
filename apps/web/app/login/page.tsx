@@ -27,6 +27,8 @@ export default function LoginPage() {
 
       if (!data.user.personalityComplete) {
         router.push("/onboarding/personality");
+      } else if (data.user.role === "ADMIN") {
+        router.push("/admin");
       } else {
         router.push("/chat");
       }

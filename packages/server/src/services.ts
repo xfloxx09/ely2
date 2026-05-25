@@ -99,6 +99,11 @@ export async function getUserById(id: string) {
   return user;
 }
 
+export function toPublicUser(user: NonNullable<Awaited<ReturnType<typeof getUserById>>>) {
+  const { passwordHash: _, ...publicUser } = user;
+  return publicUser;
+}
+
 export async function submitPersonalityTest(
   userId: string,
   responses: Record<number, number>,

@@ -21,7 +21,8 @@ type PlatformSettings = {
 
 export default function AdminPage() {
   const [users, setUsers] = useState<{ id: string; email: string; tier: string; role: string }[]>([]);
-  const [authorized, setAuthorized] = useState(false);
+  const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const [denyReason, setDenyReason] = useState<string>("");
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [llmProvider, setLlmProvider] = useState("gemini");
   const [geminiModel, setGeminiModel] = useState("gemini-2.0-flash");
@@ -32,12 +33,23 @@ export default function AdminPage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
+    const token = localStorage.getItem("ely_token");
+    if (!token) {
+      setAuthorized(false);
+      setDenyReason("You are not logged in. Please log in with your admin account first.");
+      return;
+    }
+
     apiFetch("/auth/me")
       .then((d) => {
         if (d.user?.role === "ADMIN") {
           setAuthorized(true);
           return Promise.all([apiFetch("/admin/users"), apiFetch("/admin/platform-settings")]);
         }
+        setAuthorized(false);
+        setDenyReason(
+          `Logged in as ${d.user?.email || "unknown"}, but this account does not have the ADMIN role. Run pnpm db:create-admin on production, then log in again.`
+        );
         throw new Error("Not admin");
       })
       .then(([userList, platformSettings]) => {
@@ -46,7 +58,20 @@ export default function AdminPage() {
         setLlmProvider(platformSettings.llmProvider || "gemini");
         setGeminiModel(platformSettings.geminiModel || "gemini-2.0-flash");
       })
-      .catch(() => setAuthorized(false));
+      .catch((err) => {
+        setAuthorized((prev) => {
+          if (prev === true) return prev;
+          return false;
+        });
+        setDenyReason((prev) => {
+          if (prev) return prev;
+          const msg = err instanceof Error ? err.message : "";
+          if (msg.includes("Unauthorized") || msg.includes("Request failed")) {
+            return "Your session expired (common after a deploy). Log out and log back in, then return to /admin.";
+          }
+          return msg || "Could not verify admin access.";
+        });
+      });
   }, []);
 
   async function savePlatformSettings() {
@@ -94,10 +119,31 @@ export default function AdminPage() {
     }
   }
 
+  if (authorized === null) {
+    return (
+      <AppShell>
+        <div className="p-8 text-center text-ely-muted">Checking admin access...</div>
+      </AppShell>
+    );
+  }
+
   if (!authorized) {
     return (
       <AppShell>
-        <div className="p-8 text-center text-ely-muted">Admin access required</div>
+        <div className="mx-auto max-w-lg p-8 text-center">
+          <h1 className="text-xl font-semibold mb-3">Admin access required</h1>
+          <p className="text-sm text-ely-muted leading-relaxed mb-6">{denyReason}</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Button onClick={() => (window.location.href = "/login")}>Go to login</Button>
+            <Button variant="secondary" onClick={() => (window.location.href = "/chat")}>
+              Back to chat
+            </Button>
+          </div>
+          <p className="mt-6 text-xs text-ely-muted">
+            Admin login: <span className="text-white">admin@ely.ai</span> — password set via{" "}
+            <code className="text-ely-accent">pnpm db:create-admin</code>
+          </p>
+        </div>
       </AppShell>
     );
   }

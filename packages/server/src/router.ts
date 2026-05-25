@@ -11,6 +11,7 @@ import {
   registerUser,
   loginUser,
   getUserById,
+  toPublicUser,
   submitPersonalityTest,
   getPersonalityProfile,
   getOrCreateConversation,
@@ -61,7 +62,7 @@ const PUBLIC_PATHS = [
 export async function handleApiRequest(req: ApiRequest): Promise<{ status: number; body: unknown }> {
   const { method, path, body, authHeader } = req;
   const token = getAuthToken(authHeader ?? null);
-  const userId = getSessionUser(token);
+  const userId = await getSessionUser(token);
   const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "?"));
 
   if (!isPublic && !path.startsWith("/webhooks") && !userId) {
@@ -83,20 +84,21 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
         referralCode?: string;
       };
       const user = await registerUser(email, password, name, referralCode);
-      const sessionToken = createSession(user.id);
+      const sessionToken = await createSession(user.id);
       return { status: 200, body: { user, token: sessionToken } };
     }
 
     if (method === "POST" && path === "/auth/login") {
       const { email, password } = body as { email: string; password: string };
       const user = await loginUser(email, password);
-      const sessionToken = createSession(user.id);
+      const sessionToken = await createSession(user.id);
       return { status: 200, body: { user, token: sessionToken } };
     }
 
     if (method === "GET" && path === "/auth/me") {
       const user = await getUserById(userId!);
-      return { status: 200, body: { user } };
+      if (!user) return { status: 404, body: { error: "User not found" } };
+      return { status: 200, body: { user: toPublicUser(user) } };
     }
 
     if (method === "POST" && path === "/personality/story/generate") {
