@@ -79,7 +79,7 @@ export default function CommunityPage() {
         method: "POST",
         body: JSON.stringify({ recipientId: selected.id }),
       });
-      router.push(`/community/dm/${data.conversation.id}`);
+      router.push(`/conversations/${data.conversation.id}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -103,7 +103,7 @@ export default function CommunityPage() {
           exchanges,
         }),
       });
-      router.push(`/community/dm/${data.conversation.id}?ai=1`);
+      router.push(`/conversations/${data.conversation.id}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -33,6 +33,43 @@ export type CommunityUser = {
   styleSummary: string | null;
 };
 
+export type ConversationInboxItem = {
+  id: string;
+  type: "DIRECT" | "AI_PERSONA";
+  title: string;
+  subtitle: string;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+  peerId?: string;
+  peerName?: string | null;
+  peerAvatarUrl?: string | null;
+  topic?: string;
+};
+
+type ConvMetadata = {
+  readBy?: Record<string, string>;
+  topic?: string;
+  initiatorId?: string;
+  targetUserId?: string;
+  initiatorName?: string;
+  targetName?: string;
+  recipientId?: string;
+  recipientName?: string;
+};
+
+function getReadAt(metadata: ConvMetadata, userId: string): Date {
+  const iso = metadata.readBy?.[userId];
+  return iso ? new Date(iso) : new Date(0);
+}
+
+function withReadAt(metadata: ConvMetadata, userId: string): ConvMetadata {
+  return {
+    ...metadata,
+    readBy: { ...(metadata.readBy || {}), [userId]: new Date().toISOString() },
+  };
+}
+
 async function profileForUser(userId: string) {
   const db = getDb();
   const [commProfile] = await db
@@ -183,7 +220,132 @@ export async function listMySocialConversations(userId: string) {
   });
 }
 
-export async function getSocialConversation(conversationId: string, userId: string) {
+export async function markConversationRead(conversationId: string, userId: string) {
+  await ensureSocialTables();
+  const db = getDb();
+  const { conversation } = await getSocialConversation(conversationId, userId, { skipMarkRead: true });
+  const metadata = (conversation.metadata || {}) as ConvMetadata;
+
+  await db
+    .update(socialConversations)
+    .set({
+      metadata: withReadAt(metadata, userId),
+      updatedAt: conversation.updatedAt,
+    })
+    .where(eq(socialConversations.id, conversationId));
+
+  return { success: true };
+}
+
+export async function getUnreadConversationCount(userId: string): Promise<number> {
+  const inbox = await getConversationInbox(userId);
+  return inbox.direct.reduce((s, c) => s + c.unreadCount, 0) + inbox.avatar.reduce((s, c) => s + c.unreadCount, 0);
+}
+
+export async function getConversationInbox(userId: string): Promise<{
+  direct: ConversationInboxItem[];
+  avatar: ConversationInboxItem[];
+  totalUnread: number;
+}> {
+  await ensureSocialTables();
+  const db = getDb();
+  const rows = await listMySocialConversations(userId);
+
+  const peerIds = new Set<string>();
+  for (const conv of rows) {
+    const ids = (conv.participantIds as string[]) || [];
+    const peer = ids.find((id) => id !== userId);
+    if (peer) peerIds.add(peer);
+  }
+
+  const peerMap = new Map<string, { name: string | null; avatarUrl: string | null }>();
+  if (peerIds.size) {
+    const peerList = [...peerIds];
+    for (const peerId of peerList) {
+      const [u] = await db.select({ name: users.name }).from(users).where(eq(users.id, peerId)).limit(1);
+      const [a] = await db.select({ imageUrl: avatars.imageUrl }).from(avatars).where(eq(avatars.userId, peerId)).limit(1);
+      peerMap.set(peerId, { name: u?.name ?? null, avatarUrl: a?.imageUrl ?? null });
+    }
+  }
+
+  const direct: ConversationInboxItem[] = [];
+  const avatar: ConversationInboxItem[] = [];
+
+  for (const conv of rows) {
+    const metadata = (conv.metadata || {}) as ConvMetadata;
+    const readAt = getReadAt(metadata, userId);
+    const participantIds = (conv.participantIds as string[]) || [];
+    const peerId = participantIds.find((id) => id !== userId);
+
+    const msgs = await db
+      .select()
+      .from(socialMessages)
+      .where(eq(socialMessages.conversationId, conv.id))
+      .orderBy(desc(socialMessages.createdAt))
+      .limit(50);
+
+    const last = msgs[0];
+    let unreadCount = 0;
+
+    if (conv.type === "DIRECT") {
+      unreadCount = msgs.filter(
+        (m) => m.senderId && m.senderId !== userId && new Date(m.createdAt) > readAt
+      ).length;
+    } else {
+      const neverRead = !metadata.readBy?.[userId];
+      const isTarget = metadata.targetUserId === userId && metadata.initiatorId !== userId;
+      if (neverRead && (isTarget || conv.createdById !== userId)) {
+        unreadCount = msgs.length > 0 ? 1 : 0;
+      } else if (neverRead && conv.createdById === userId) {
+        unreadCount = 0;
+      } else if (new Date(conv.updatedAt) > readAt) {
+        unreadCount = 1;
+      }
+    }
+
+    const peer = peerId ? peerMap.get(peerId) : undefined;
+    const item: ConversationInboxItem = {
+      id: conv.id,
+      type: conv.type,
+      title:
+        conv.type === "DIRECT"
+          ? peer?.name
+            ? `Chat with ${peer.name}`
+            : conv.title
+          : conv.title,
+      subtitle:
+        conv.type === "DIRECT"
+          ? last?.senderId === userId
+            ? "You sent a message"
+            : `${peer?.name || "Traveler"} messaged you`
+          : metadata.topic || "AI persona dialogue",
+      lastMessage: last?.content?.slice(0, 120) ?? null,
+      lastMessageAt: last?.createdAt?.toISOString() ?? conv.updatedAt?.toISOString() ?? null,
+      unreadCount,
+      peerId,
+      peerName: peer?.name,
+      peerAvatarUrl: peer?.avatarUrl,
+      topic: metadata.topic,
+    };
+
+    if (conv.type === "DIRECT") direct.push(item);
+    else avatar.push(item);
+  }
+
+  direct.sort((a, b) => (b.lastMessageAt || "").localeCompare(a.lastMessageAt || ""));
+  avatar.sort((a, b) => (b.lastMessageAt || "").localeCompare(a.lastMessageAt || ""));
+
+  const totalUnread =
+    direct.reduce((s, c) => s + c.unreadCount, 0) + avatar.reduce((s, c) => s + c.unreadCount, 0);
+
+  return { direct, avatar, totalUnread };
+}
+
+export async function getSocialConversation(
+  conversationId: string,
+  userId: string,
+  opts?: { skipMarkRead?: boolean }
+) {
   await ensureSocialTables();
   const db = getDb();
   const [conv] = await db.select().from(socialConversations).where(eq(socialConversations.id, conversationId)).limit(1);
@@ -200,13 +362,21 @@ export async function getSocialConversation(conversationId: string, userId: stri
     .where(eq(socialMessages.conversationId, conversationId))
     .orderBy(socialMessages.createdAt);
 
+  if (!opts?.skipMarkRead) {
+    const metadata = (conv.metadata || {}) as ConvMetadata;
+    await db
+      .update(socialConversations)
+      .set({ metadata: withReadAt(metadata, userId) })
+      .where(eq(socialConversations.id, conversationId));
+  }
+
   return { conversation: conv, messages };
 }
 
 export async function sendDirectMessage(conversationId: string, senderId: string, content: string) {
   await ensureSocialTables();
   const db = getDb();
-  const { conversation } = await getSocialConversation(conversationId, senderId);
+  const { conversation } = await getSocialConversation(conversationId, senderId, { skipMarkRead: true });
   if (conversation.type !== "DIRECT") throw new Error("Not a direct message thread");
 
   const [message] = await db
@@ -316,6 +486,7 @@ Generate ${clampedExchanges} back-and-forth exchanges (${totalLines} lines total
         targetUserId,
         initiatorName,
         targetName,
+        readBy: { [initiatorId]: new Date().toISOString() },
       },
     })
     .returning();

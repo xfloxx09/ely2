@@ -53,6 +53,9 @@ import {
   startAiPersonaBattle,
   getUserPublicCard,
   AI_BATTLE_TOPICS,
+  getConversationInbox,
+  getUnreadConversationCount,
+  markConversationRead,
 } from "./social-service.js";
 
 type ApiRequest = {
@@ -246,6 +249,15 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
       return { status: 200, body: { conversations: await listMySocialConversations(userId!) } };
     }
 
+    if (method === "GET" && path === "/conversations/inbox") {
+      return { status: 200, body: await getConversationInbox(userId!) };
+    }
+
+    if (method === "GET" && path === "/conversations/unread-count") {
+      const count = await getUnreadConversationCount(userId!);
+      return { status: 200, body: { count } };
+    }
+
     if (method === "POST" && path === "/community/dm") {
       const { recipientId } = body as { recipientId: string };
       const result = await startDirectMessage(userId!, recipientId);
@@ -270,6 +282,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
     if (method === "GET" && path.startsWith("/community/conversation/")) {
       const convId = path.replace("/community/conversation/", "");
       return { status: 200, body: await getSocialConversation(convId, userId!) };
+    }
+
+    if (method === "POST" && path.startsWith("/community/conversation/") && path.endsWith("/read")) {
+      const convId = path.replace("/community/conversation/", "").replace("/read", "");
+      return { status: 200, body: await markConversationRead(convId, userId!) };
     }
 
     if (method === "POST" && path.startsWith("/community/conversation/") && path.endsWith("/message")) {
