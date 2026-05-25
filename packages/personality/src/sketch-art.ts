@@ -26,11 +26,6 @@ function escapeXml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function truncate(text: string, max: number): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
-}
-
 type SettingKind = "coastal" | "library" | "garden" | "train" | "city" | "generic";
 
 function detectSetting(setting: string): SettingKind {
@@ -194,7 +189,8 @@ function drawElement(el: StoryElement, heroX: number, hash: number): string {
   }
 }
 
-function drawHero(heroX: number, heroName: string, answerValue?: number): string {
+function drawHero(heroX: number, _heroName: string, answerValue?: number): string {
+  void _heroName;
   const mood = answerValue ?? 3;
   const stride = mood >= 4 ? 4 : mood <= 2 ? -2 : 0;
   const headY = 188 + stride;
@@ -206,7 +202,6 @@ function drawHero(heroX: number, heroName: string, answerValue?: number): string
       <path d="M${heroX} ${headY + 42} L${heroX - 10 + stride} ${headY + 58} M${heroX} ${headY + 42} L${heroX + 10 - stride} ${headY + 58}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.1"/>
       <path d="M${heroX - 8} ${headY - 2} Q${heroX} ${headY - 14} ${heroX + 8} ${headY - 2}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.8"/>
     </g>
-    <text x="${heroX}" y="${headY + 78}" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="9" font-family="Georgia, serif">${escapeXml(heroName.slice(0, 12))}</text>
   `;
 }
 
@@ -221,11 +216,11 @@ function crosshatch(count: number, hash: number, opacity: number): string {
   return lines.join("");
 }
 
-/** Story-continuous pencil sketch — each frame advances the same journey */
-export function generateStorySceneSvg(input: StorySceneInput): string {
+/** Art-only pencil sketch fallback — captions render in HTML, not inside the SVG */
+export function generateStorySceneArtSvg(input: StorySceneInput): string {
   const hash = hashSeed(input.seed);
   const progress = input.totalBeats > 1 ? input.beatIndex / (input.totalBeats - 1) : 0;
-  const heroX = 70 + progress * 240;
+  const heroX = Math.min(70 + progress * 200, 280);
   const settingKind = detectSetting(input.setting);
   const elements = detectElements(input.narrative, input.scenePrompt, input.chapterTitle);
 
@@ -237,30 +232,29 @@ export function generateStorySceneSvg(input: StorySceneInput): string {
   const storyProps = elements.map((el) => drawElement(el, heroX, hash + el.length * 17)).join("");
   const hero = drawHero(heroX, input.heroName, input.answerValue);
 
-  const chapterLabel = `Ch. ${input.chapter} — ${input.chapterTitle}`;
-  const caption = truncate(input.narrative, 110);
-  const choiceNote = input.choiceLabel ? truncate(input.choiceLabel, 72) : "";
-
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 320" width="400" height="320">
     <defs>
       <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="4" result="n"/><feDiffuseLighting in="n" lighting-color="#12121a" surfaceScale="1"><feDistantLight azimuth="50" elevation="58"/></feDiffuseLighting></filter>
       <radialGradient id="sky" cx="${30 + progress * 40}%" cy="30%"><stop offset="0%" stop-color="hsla(${hue},30%,${38 + moodShift * 100}%,0.5)"/><stop offset="100%" stop-color="hsla(${hue},20%,8%,0.96)"/></radialGradient>
+      <clipPath id="artClip"><rect x="0" y="0" width="400" height="320"/></clipPath>
     </defs>
-    <rect width="400" height="320" fill="url(#sky)"/>
-    ${crosshatch(12, hash, 0.05)}
-    ${backdrop}
-    ${storyProps}
-    ${hero}
-    ${crosshatch(6, hash + 99, 0.03)}
-    <rect x="0" y="248" width="400" height="72" fill="rgba(8,8,12,0.72)"/>
-    <line x1="20" y1="248" x2="380" y2="248" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
-    <text x="20" y="266" fill="rgba(255,255,255,0.45)" font-size="8" font-family="Georgia, serif" letter-spacing="0.08em">${escapeXml(chapterLabel.toUpperCase())}</text>
-    <text x="20" y="284" fill="rgba(255,255,255,0.78)" font-size="11" font-family="Georgia, serif">${escapeXml(caption)}</text>
-    ${choiceNote ? `<text x="20" y="302" fill="rgba(167,139,250,0.85)" font-size="9" font-family="Georgia, serif" font-style="italic">${escapeXml(`You chose: ${choiceNote}`)}</text>` : `<text x="20" y="302" fill="rgba(255,255,255,0.3)" font-size="9" font-family="Georgia, serif">Moment ${input.beatIndex + 1} of ${input.totalBeats}</text>`}
+    <g clip-path="url(#artClip)">
+      <rect width="400" height="320" fill="url(#sky)"/>
+      ${crosshatch(12, hash, 0.05)}
+      ${backdrop}
+      ${storyProps}
+      ${hero}
+      ${crosshatch(6, hash + 99, 0.03)}
+    </g>
     <rect width="400" height="320" fill="url(#paper)" opacity="0.14"/>
   </svg>`;
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/** @deprecated Captions moved to HTML — use generateStorySceneArtSvg */
+export function generateStorySceneSvg(input: StorySceneInput): string {
+  return generateStorySceneArtSvg(input);
 }
 
 /** @deprecated Use generateStorySceneSvg — kept for compatibility */

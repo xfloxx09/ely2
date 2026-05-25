@@ -1,6 +1,7 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
 import { geminiGenerateText, resolveLlmProvider, type LlmKeySource } from "./gemini.js";
+import { buildContinuousArc } from "./story-arc.js";
 
 export type StoryChoice = {
   label: string;
@@ -25,6 +26,12 @@ export type StoryJourney = {
   heroName: string;
   setting: string;
   beats: StoryBeat[];
+  _debug?: StoryGenerationDebug;
+};
+
+export type StoryGenerationDebug = {
+  storySource: "gemini" | "openai" | "fallback";
+  storyModel?: string;
 };
 
 const SETTINGS = [
@@ -246,62 +253,8 @@ export function contextualStoryChoices(
   return pack(set[v]!);
 }
 
-function narrativeForQuestion(q: BFIQuestion, hero: string, setting: string, idx: number): string {
-  const intros = [
-    `As ${hero} walks deeper into ${setting}, the world seems to pause and listen.`,
-    `The path twists. ${hero} finds a moment of stillness, and a question rises unbidden.`,
-    `Memory and possibility intertwine. ${hero} must choose what feels most honest.`,
-    `Soft light gathers around ${hero}. The story waits for an answer only they can give.`,
-  ];
-  const intro = intros[idx % intros.length];
-  const traitMood: Record<string, string> = {
-    openness: "Something unfamiliar shimmers at the edge of perception — curiosity, or caution?",
-    extraversion: "Voices carry on the wind. Does the heart lean toward the crowd, or the quiet?",
-    conscientiousness: "A task unfinished, a plan unmade. How does order live inside this soul?",
-    agreeableness: "Another traveler appears on the road. What lives in the space between two people?",
-    neuroticism: "The air tightens. Storm or calm — which feels more like home inside?",
-  };
-  return `${intro} ${traitMood[q.trait] || "The moment asks for truth."}`;
-}
-
-function scenePromptFor(q: BFIQuestion, setting: string, chapter: number): string {
-  const scenes: Record<string, string> = {
-    openness: "open doorway leading to surreal landscape, floating books, stars",
-    extraversion: "lively marketplace or gathering, warm faces, lanterns",
-    conscientiousness: "organized desk, maps, compass, neat architecture",
-    agreeableness: "two figures sharing tea, gentle bridge, soft trees",
-    neuroticism: "calm lake reflecting sky, sheltered alcove, steady horizon",
-    neuroticism_alt: "rain on window, but peaceful interior light",
-  };
-  const detail = scenes[q.trait] || "mysterious path through soft fog";
-  return `Chapter ${chapter}, ${setting}, ${detail}, pencil sketch, graphite drawing on textured paper, crosshatching, artistic, no text`;
-}
-
-function questionAsStory(q: BFIQuestion, hero: string): string {
-  const templates: Record<string, string[]> = {
-    openness: [
-      `${hero}, when the unknown calls — do you run toward wonder, or prefer the familiar ground beneath your feet?`,
-      `A door opens to something strange and beautiful. How much of yourself do you give to the new?`,
-    ],
-    extraversion: [
-      `In a room full of stories, does ${hero}'s spirit ignite — or seek a quieter corner to breathe?`,
-      `When the world is loud with possibility, where does ${hero} truly come alive?`,
-    ],
-    conscientiousness: [
-      `Before the journey continues — does ${hero} need a plan, a list, a map... or does freedom matter more?`,
-      `The road ahead splits. Does ${hero} walk with careful steps, or trust the wind?`,
-    ],
-    agreeableness: [
-      `Someone needs help on the path. How quickly does ${hero}'s heart move to soften the fall?`,
-      `When conflict whispers — does ${hero} seek harmony, or stand firm in their truth?`,
-    ],
-    neuroticism: [
-      `When the sky darkens unexpectedly — what stirs inside ${hero}?`,
-      `The ground shifts. Does ${hero} find their center easily, or does the world feel heavier?`,
-    ],
-  };
-  const opts = templates[q.trait] || [`What feels most true of ${hero} in this moment?`];
-  return opts[q.id % opts.length]!;
+function scenePromptFromArc(setting: string, chapter: number, sceneDetail: string): string {
+  return `${setting}, ${sceneDetail}, chapter ${chapter}, continuous story journey, pencil sketch, graphite on paper, no text`;
 }
 
 export function buildFallbackStory(userId: string, userName?: string): StoryJourney {
@@ -309,41 +262,51 @@ export function buildFallbackStory(userId: string, userName?: string): StoryJour
   const hero = userName?.split(" ")[0] || "You";
   const setting = pick(SETTINGS, seed);
   const title = `The Awakening of ${hero}`;
+  const arc = buildContinuousArc(hero, setting);
 
   const beats: StoryBeat[] = BFI2_SHORT.map((q, i) => {
     const chapter = Math.floor(i / 3) + 1;
+    const moment = arc[i]!;
     return {
       id: i + 1,
       bfiId: q.id,
       trait: q.trait,
       chapter,
       chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
-      narrative: narrativeForQuestion(q, hero, setting, i),
-      question: questionAsStory(q, hero),
+      narrative: moment.narrative,
+      question: moment.question,
       choices: contextualStoryChoices(q, hero, i),
-      scenePrompt: scenePromptFor(q, setting, chapter),
+      scenePrompt: scenePromptFromArc(setting, chapter, moment.sceneDetail),
     };
   });
 
   return {
     title,
-    prologue: `There is a place — ${setting} — where every soul leaves a trace in the air. Tonight, the pages turn for ${hero}. This is not a test. It is a story only you can finish. As you choose, something begins to take shape: a face, a companion, a reflection of who you truly are.`,
+    prologue: `${hero} steps into ${setting} with a blank map that only fills when their story is told truthfully. Over thirty moments, one journey unfolds — from the first lantern to the mirror pool where a companion takes shape. This is not a test. It is the tale of how ${hero} becomes whole.`,
     heroName: hero,
     setting,
     beats,
   };
 }
 
-const STORY_SYSTEM_PROMPT = `You create immersive personalized story questionnaires for personality discovery. 
-Return JSON with: title, prologue (2-3 poetic sentences), heroName, setting, beats (array of exactly 30).
-Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, ~3 beats each), chapterTitle, narrative (2 sentences of story prose), question (story-framed, no clinical language), choices (array of exactly 5 UNIQUE options for THIS beat only — each with label and value), scenePrompt (pencil sketch image description).
+const STORY_SYSTEM_PROMPT = `You create ONE continuous short story split into exactly 30 sequential beats for personality discovery.
+Return JSON with: title, prologue (2-3 sentences setting up the whole arc), heroName, setting, beats (array of exactly 30).
+
+STORY CONTINUITY (mandatory):
+- This is a single tale from beat 1 to 30 — a complete hero's journey with beginning, middle, and end
+- Beat 1 opens the adventure; beat 30 resolves at a mirror/reveal where a companion is born
+- Each beat MUST reference what just happened in the previous beat (carry objects, characters, locations forward)
+- Never reset to a random new scene without a story transition
+- Recurring elements: a glowing map that fills with each choice, at least one companion/traveler who returns
+
+Each beat must include: id (1-30), bfiId (matching input), trait, chapter (1-10, 3 beats each), chapterTitle, narrative (2 sentences continuing the plot), question (story-framed, tied to THIS exact moment), choices (5 unique options with label and value), scenePrompt (pencil sketch of THIS scene).
 
 CRITICAL scoring rules for choices:
 - values must be exactly 5, 4, 3, 2, 1 (each used once)
-- value 5 = strongest agreement with the original BFI statement (even if reverseScored / negative wording like "lazy" or "quiet")
+- value 5 = strongest agreement with the original BFI statement (even if reverseScored)
 - value 1 = strongest disagreement with that statement
-- labels must be story actions or feelings tied to THIS beat's question — never reuse generic scales like "agree strongly"
-- Never mention Big Five or psychology. Make it magical, literary, and unique.`;
+- labels must be story actions tied to THIS beat — never generic agree/disagree scales
+- Never mention Big Five or psychology.`;
 
 function normalizeBeatChoices(
   beat: StoryBeat,
@@ -364,14 +327,38 @@ function normalizeBeatChoices(
 
 function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
   const hero = journey.heroName || "You";
+  const setting = journey.setting || pick(SETTINGS, 0);
+  const arc = buildContinuousArc(hero, setting);
+
   const beats = journey.beats.map((beat, index) => {
     const question = BFI2_SHORT.find((q) => q.id === beat.bfiId);
+    const fallback = arc[index];
     if (!question) return beat;
+
+    const narrative =
+      beat.narrative && beat.narrative.length > 50 && !beat.narrative.includes("world seems to pause")
+        ? beat.narrative
+        : fallback?.narrative || beat.narrative;
+
+    const storyQuestion =
+      beat.question && beat.question.length > 30 ? beat.question : fallback?.question || beat.question;
+
+    const scenePrompt =
+      beat.scenePrompt && beat.scenePrompt.length > 20
+        ? beat.scenePrompt
+        : fallback
+          ? scenePromptFromArc(setting, beat.chapter || Math.floor(index / 3) + 1, fallback.sceneDetail)
+          : beat.scenePrompt;
+
     return {
       ...beat,
+      narrative,
+      question: storyQuestion,
+      scenePrompt,
       choices: normalizeBeatChoices(beat, question, hero, index),
     };
   });
+
   return { ...journey, beats };
 }
 
@@ -381,8 +368,13 @@ export async function generateStoryJourney(
   llmKeys?: LlmKeySource
 ): Promise<StoryJourney> {
   const provider = resolveLlmProvider(llmKeys);
+  const fallback = (): StoryJourney => ({
+    ...buildFallbackStory(userId, userName),
+    _debug: { storySource: "fallback", storyModel: "built-in-arc" },
+  });
+
   if (!provider) {
-    return buildFallbackStory(userId, userName);
+    return fallback();
   }
 
   const bfiList = BFI2_SHORT.map((q) => ({
@@ -392,8 +384,23 @@ export async function generateStoryJourney(
     original: q.text,
   }));
 
-  const userPrompt = `Create a unique story for user "${userName || "Traveler"}" (id seed: ${userId.slice(0, 8)}). 
-Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
+  const arcOutline = buildContinuousArc(userName || "Traveler", "a magical realm").map((m, i) => ({
+    beat: i + 1,
+    bfiId: BFI2_SHORT[i]?.id,
+    plotHint: m.narrative.slice(0, 80),
+  }));
+
+  const userPrompt = `Create a unique continuous story for "${userName || "Traveler"}" (seed: ${userId.slice(0, 8)}).
+Use this plot spine as inspiration — each beat must flow into the next like chapters of one book:
+${JSON.stringify(arcOutline)}
+
+Map these 30 personality moments to story beats (same order, same bfiId):
+${JSON.stringify(bfiList)}`;
+
+  const storyModel =
+    provider === "gemini"
+      ? llmKeys?.geminiModel ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
+      : "gpt-4o-mini";
 
   try {
     let raw = "";
@@ -410,7 +417,7 @@ Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
       });
     } else {
       const openaiKey = llmKeys?.openaiKey ?? process.env.OPENAI_API_KEY;
-      if (!openaiKey) return buildFallbackStory(userId, userName);
+      if (!openaiKey) return fallback();
       const OpenAI = (await import("openai")).default;
       const openai = new OpenAI({ apiKey: openaiKey });
       const response = await openai.chat.completions.create({
@@ -428,13 +435,16 @@ Map these 30 personality moments: ${JSON.stringify(bfiList)}`;
 
     const parsed = JSON.parse(raw || "{}") as StoryJourney;
     if (parsed.beats?.length === 30) {
-      return hydrateStoryBeats(parsed);
+      return {
+        ...hydrateStoryBeats(parsed),
+        _debug: { storySource: provider, storyModel },
+      };
     }
   } catch {
     // fall through
   }
 
-  return buildFallbackStory(userId, userName);
+  return fallback();
 }
 
 export function partialScoresFromResponses(

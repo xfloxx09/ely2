@@ -4,9 +4,9 @@ import { BFI2_SHORT, BFI2_LONG } from "@ely/personality";
 import {
   generateStoryJourney,
   partialScoresFromResponses,
-  generateStorySceneSvg,
   generateAvatarSilhouetteSvg,
 } from "@ely/personality";
+import { generateStorySceneImage, resolveSketchCapabilities } from "@ely/ai";
 import {
   registerUser,
   loginUser,
@@ -104,8 +104,23 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
     if (method === "POST" && path === "/personality/story/generate") {
       const user = await getUserById(userId!);
       const platformConfig = await getPlatformConfig();
-      const story = await generateStoryJourney(userId!, user?.name || undefined, toLlmKeySource(platformConfig));
-      return { status: 200, body: story };
+      const llmKeys = toLlmKeySource(platformConfig);
+      const story = await generateStoryJourney(userId!, user?.name || undefined, llmKeys);
+      const sketchConfigured = resolveSketchCapabilities({
+        replicateToken: platformConfig.replicateApiToken,
+        geminiKey: platformConfig.geminiApiKey,
+        geminiModel: platformConfig.geminiModel,
+      });
+      return {
+        status: 200,
+        body: {
+          ...story,
+          _debug: {
+            ...story._debug,
+            sketchConfigured,
+          },
+        },
+      };
     }
 
     if (method === "POST" && path === "/personality/story/preview") {
@@ -135,7 +150,8 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
         setting?: string;
         heroName?: string;
       };
-      const imageUrl = generateStorySceneSvg({
+      const platformConfig = await getPlatformConfig();
+      const sceneInput = {
         beatIndex: bodyData.beatIndex ?? 0,
         totalBeats: bodyData.totalBeats ?? 30,
         chapter: bodyData.chapter ?? 1,
@@ -147,8 +163,13 @@ export async function handleApiRequest(req: ApiRequest): Promise<{ status: numbe
         answerValue: bodyData.answerValue,
         choiceLabel: bodyData.choiceLabel,
         seed: bodyData.seed ?? Date.now(),
+      };
+      const result = await generateStorySceneImage(sceneInput, {
+        replicateToken: platformConfig.replicateApiToken,
+        geminiKey: platformConfig.geminiApiKey,
+        geminiModel: platformConfig.geminiModel,
       });
-      return { status: 200, body: { imageUrl } };
+      return { status: 200, body: { imageUrl: result.imageUrl, _debug: result._debug } };
     }
 
     if (method === "GET" && path.startsWith("/personality/questions")) {

@@ -30,6 +30,11 @@ type StoryJourney = {
   heroName: string;
   setting: string;
   beats: StoryBeat[];
+  _debug?: {
+    storySource?: "gemini" | "openai" | "fallback";
+    storyModel?: string;
+    sketchConfigured?: { sketchSource: string; sketchModel?: string };
+  };
 };
 
 type Phase = "loading" | "prologue" | "story" | "submitting" | "reveal";
@@ -37,6 +42,7 @@ type Phase = "loading" | "prologue" | "story" | "submitting" | "reveal";
 type SceneCacheEntry = {
   url: string;
   seed: number;
+  _debug?: { sketchSource: string; sketchModel?: string };
 };
 
 function sceneSeedForBeat(bfiId: number, answerValue?: number) {
@@ -63,6 +69,9 @@ export default function PersonalityOnboarding() {
   const [readyToAdvance, setReadyToAdvance] = useState(false);
   const [revealAvatar, setRevealAvatar] = useState<string | null>(null);
   const [sceneAnimating, setSceneAnimating] = useState(true);
+  const [sceneLoading, setSceneLoading] = useState(false);
+  const [storyDebug, setStoryDebug] = useState<StoryJourney["_debug"]>(undefined);
+  const [sketchDebug, setSketchDebug] = useState<SceneCacheEntry["_debug"]>(undefined);
 
   const beat = story?.beats[beatIndex];
   const totalBeats = story?.beats.length ?? 30;
@@ -99,6 +108,7 @@ export default function PersonalityOnboarding() {
       if (!payload) return;
 
       setSceneAnimating(animate);
+      setSceneLoading(true);
       try {
         const data = await apiFetch("/personality/story/scene", {
           method: "POST",
@@ -106,10 +116,13 @@ export default function PersonalityOnboarding() {
         });
         setSceneCache((prev) => ({
           ...prev,
-          [index]: { url: data.imageUrl, seed: payload.seed },
+          [index]: { url: data.imageUrl, seed: payload.seed, _debug: data._debug },
         }));
+        if (data._debug) setSketchDebug(data._debug);
       } catch {
         /* keep previous */
+      } finally {
+        setSceneLoading(false);
       }
     },
     [buildScenePayload]
@@ -136,6 +149,7 @@ export default function PersonalityOnboarding() {
     apiFetch("/personality/story/generate", { method: "POST" })
       .then((data: StoryJourney) => {
         setStory(data);
+        setStoryDebug(data._debug ?? undefined);
         setPhase("prologue");
       })
       .catch(() => setPhase("prologue"));
@@ -152,7 +166,14 @@ export default function PersonalityOnboarding() {
     setSelectedValue(responses[story.beats[beatIndex]?.bfiId] ?? null);
     setReadyToAdvance(responses[story.beats[beatIndex]?.bfiId] !== undefined);
     setViewSceneIndex(beatIndex);
+    const cached = sceneCache[beatIndex]?._debug;
+    if (cached) setSketchDebug(cached);
   }, [beatIndex, story]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const cached = sceneCache[viewSceneIndex]?._debug;
+    if (cached) setSketchDebug(cached);
+  }, [viewSceneIndex, sceneCache]);
 
   function selectChoice(value: number) {
     if (!beat || !story || readyToAdvance) return;
@@ -269,6 +290,13 @@ export default function PersonalityOnboarding() {
             {story.prologue}
           </motion.p>
 
+          {story._debug && (
+            <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 font-mono text-[10px] text-amber-100/85">
+              Debug · Story: {story._debug.storySource} ({story._debug.storyModel}) · Sketch configured:{" "}
+              {story._debug.sketchConfigured?.sketchSource} ({story._debug.sketchConfigured?.sketchModel})
+            </p>
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -327,6 +355,16 @@ export default function PersonalityOnboarding() {
 
       <div className="relative mx-auto max-w-5xl">
         <header className="mb-6">
+          {(storyDebug || sketchDebug) && (
+            <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-amber-100/90 sm:text-[11px]">
+              <span className="font-semibold text-amber-200">Debug</span>
+              {" · "}
+              Story: {storyDebug?.storySource ?? "?"} ({storyDebug?.storyModel ?? "unknown"})
+              {" · "}
+              Sketch: {sketchDebug?.sketchSource ?? storyDebug?.sketchConfigured?.sketchSource ?? "?"}
+              ({sketchDebug?.sketchModel ?? storyDebug?.sketchConfigured?.sketchModel ?? "pending"})
+            </div>
+          )}
           <div className="mb-2 flex items-center justify-between text-xs text-ely-muted">
             <span className="uppercase tracking-[0.2em]">
               Chapter {displayBeat.chapter} · {displayBeat.chapterTitle}
@@ -348,9 +386,15 @@ export default function PersonalityOnboarding() {
           <div className="space-y-6">
             <PencilScene
               imageUrl={viewedScene}
+              loading={sceneLoading && viewSceneIndex === beatIndex}
               beatKey={`scene-${viewSceneIndex}-${sceneCache[viewSceneIndex]?.seed ?? "pending"}`}
               sceneIndex={viewSceneIndex}
               maxSceneIndex={maxSceneIndex}
+              chapter={displayBeat.chapter}
+              chapterTitle={displayBeat.chapterTitle}
+              narrative={displayBeat.narrative}
+              totalBeats={totalBeats}
+              choiceLabel={choiceLabelForBeat(displayBeat, responses[displayBeat.bfiId])}
               onPrev={browseScenePrev}
               onNext={browseSceneNext}
               animate={sceneAnimating && viewSceneIndex === beatIndex}
@@ -371,8 +415,8 @@ export default function PersonalityOnboarding() {
                 transition={{ duration: 0.45 }}
                 className="glass rounded-2xl p-5 sm:p-6"
               >
-                <p className="font-serif text-base leading-relaxed text-white/75 sm:text-lg">{beat.narrative}</p>
-                <p className="mt-4 text-lg font-medium leading-snug text-white sm:text-xl">{beat.question}</p>
+                <p className="font-serif text-base leading-relaxed text-white/75 break-words sm:text-lg">{beat.narrative}</p>
+                <p className="mt-4 text-lg font-medium leading-snug text-white break-words sm:text-xl">{beat.question}</p>
 
                 <div className="mt-5 space-y-2.5">
                   {beat.choices.map((choice) => (
