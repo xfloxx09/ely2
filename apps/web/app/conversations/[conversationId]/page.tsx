@@ -185,24 +185,38 @@ export default function ConversationThreadPage() {
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
           {messages.map((msg) => {
-            const isMine = isRealType(type) && msg.senderId === myUserId;
+            const isMine = msg.senderId === myUserId;
             const meta = msg.metadata || {};
 
             if (isAvatarType(type)) {
               return (
-                <div key={msg.id} className="flex gap-3">
-                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-white/10">
-                    {meta.avatarUrl ? (
-                      <img src={meta.avatarUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-ely-primary/20 text-xs">
-                        {meta.personaSide || "?"}
+                <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                  <div className={`flex max-w-[88%] gap-2.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}>
+                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-white/10">
+                      {meta.avatarUrl ? (
+                        <img src={meta.avatarUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-ely-primary/20 text-xs">
+                          {meta.personaSide || "?"}
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p
+                        className={`mb-1 text-xs font-medium ${
+                          isMine ? "text-right text-ely-primary" : "text-left text-ely-accent"
+                        }`}
+                      >
+                        {isMine ? "Your persona" : meta.speakerName || "Persona"}
+                      </p>
+                      <div
+                        className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                          isMine ? "rounded-br-md bg-ely-primary text-white" : "glass rounded-bl-md"
+                        }`}
+                      >
+                        {msg.content}
                       </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 text-xs font-medium text-ely-accent">{meta.speakerName || "Persona"}</p>
-                    <div className="rounded-2xl rounded-tl-md glass px-4 py-3 text-sm leading-relaxed">{msg.content}</div>
+                    </div>
                   </div>
                 </div>
               );
@@ -214,14 +228,16 @@ export default function ConversationThreadPage() {
                 : null;
 
             return (
-              <div key={msg.id} className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
-                {senderName && <span className="mb-1 px-1 text-[10px] text-ely-muted">{senderName}</span>}
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-                    isMine ? "rounded-br-md bg-ely-primary text-white" : "glass rounded-bl-md"
-                  }`}
-                >
-                  {msg.content}
+              <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                <div className={`flex max-w-[85%] flex-col ${isMine ? "items-end" : "items-start"}`}>
+                  {senderName && <span className="mb-1 px-1 text-[10px] text-ely-muted">{senderName}</span>}
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm ${
+                      isMine ? "rounded-br-md bg-ely-primary text-white" : "glass rounded-bl-md"
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
                 </div>
               </div>
             );
