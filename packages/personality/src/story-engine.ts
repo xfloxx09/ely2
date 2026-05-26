@@ -46,6 +46,7 @@ export type StoryGenerationDebug = {
   storyWarnings?: string[];
   storySeed?: string;
   storyPremise?: string;
+  storyBlueprintCategory?: string;
 };
 
 export type StoryGenerationOptions = {
@@ -130,39 +131,261 @@ const TIMELINE_ERAS = [
   "Post-apocalyptic future — 50 years after the collapse",
 ];
 
-/** Fully distinct story concepts — each run must commit to ONE premise, not a generic quest. */
-const STORY_PREMISES = [
-  "A wealthy teenager in modern Monaco discovers their entire life is being live-streamed to an unknown audience",
-  "A Bronze Age village child befriends a stray god disguised as a wounded wolf",
-  "First contact: a night-shift barista on a orbital habitat serves an alien diplomat who speaks in colors",
-  "A medieval blacksmith's apprentice hides a forbidden clockwork heart from the inquisitors",
-  "A retired detective in 1970s Tokyo investigates crimes that happen only inside shared dreams",
-  "A New Age wellness guru on a Bali retreat realizes one guest can actually see souls",
-  "An AI caretaker wakes inside a museum of extinct animals after humanity silently vanishes",
-  "A Viking merchant's daughter brokers peace between raiders and monks during a white winter",
-  "A street magician in 1920s Cairo finds real magic leaking through a cracked tomb seal",
-  "A Martian colonist teenager races to save their hydroponic dome before the dust season",
-  "A Regency-era governess inherits a haunted estate that rewrites itself each dawn",
-  "A professional esports player gets trapped inside their favorite game during a tournament blackout",
-  "A samurai's child in Edo-period Japan carries a letter that could start a war",
-  "An underwater biologist in 2035 discovers sentient coral that remembers the surface world",
-  "A circus runaway in Victorian London joins a secret society of inventors",
-  "A desert nomad during the Silk Road era guides a stranger who never casts a shadow",
-  "A hospice nurse in present-day Dublin begins receiving messages from patients not yet born",
-  "A pirate cartographer's apprentice maps islands that appear only during storms",
-  "A quantum physicist in a near-future lab accidentally splits their personality across timelines",
-  "A palace scribe in ancient Mesopotamia must forge a peace treaty between rival kings",
-  "A suburban kid finds a portal to a dimension where emotions are traded as currency",
-  "A jazz musician in 1950s New Orleans plays a song that opens doors to the dead",
-  "A climate refugee fleet captain navigates floating cities through acid seas",
-  "A witch trial survivor in 1600s Salem runs a hidden library of forbidden science",
-  "An interstellar courier delivers a package that screams when opened",
-  "A Michelin chef's protégé cooks meals that force diners to relive their memories",
-  "A Mongolian eagle hunter's sibling tracks a beast that steals names from the living",
-  "A Hollywood stunt double wakes up as the actor they replace — who has just been murdered",
-  "A monastery gardener in the Middle Ages tends plants that grow backward through time",
-  "A deep-sea welder repairs a cable and hears voices from the planet's molten core",
+type StoryBlueprint = {
+  category: "modern" | "retro" | "historical" | "futuristic" | "ancient";
+  premise: string;
+  timeline: string;
+  framing: string;
+  place: string;
+  mood: string;
+};
+
+/** Premise + timeline + place are locked together so the LLM cannot default to medieval every run. */
+const STORY_BLUEPRINTS: StoryBlueprint[] = [
+  {
+    category: "modern",
+    premise: "A wealthy teenager in Monaco discovers their life is being live-streamed to an unknown audience",
+    timeline: "Modern era, March 2026, one volatile weekend",
+    framing: "Contemporary literary fiction",
+    place: "Monte Carlo marina towers and private yacht decks",
+    mood: "Glamorous, paranoid, sharp",
+  },
+  {
+    category: "modern",
+    premise: "A hospice nurse in Dublin begins receiving voicemails from patients who have not been born yet",
+    timeline: "Present day, autumn 2025, four consecutive night shifts",
+    framing: "Contemporary magical realism",
+    place: "A public hospital on the River Liffey",
+    mood: "Tender, uncanny, grounded",
+  },
+  {
+    category: "modern",
+    premise: "A Michelin chef's protégé in Seoul cooks meals that force diners to relive forgotten memories",
+    timeline: "Modern era, 2026, three dinner services",
+    framing: "Contemporary drama with a surreal edge",
+    place: "A basement tasting kitchen in Gangnam",
+    mood: "Intimate, intense, sensory",
+  },
+  {
+    category: "modern",
+    premise: "A professional esports player is trapped inside their favorite game during a live tournament blackout",
+    timeline: "Modern era, July 2026, one sleepless tournament day",
+    framing: "Near-contemporary techno-thriller",
+    place: "A sold-out arena and the game's neon megacity",
+    mood: "Adrenaline, disorientation, wit",
+  },
+  {
+    category: "modern",
+    premise: "A suburban teenager finds a phone app that trades emotions like cryptocurrency",
+    timeline: "Modern era, 2026, one chaotic week of school",
+    framing: "Contemporary YA sci-fi",
+    place: "American suburb, mall, and rooftop parties",
+    mood: "Playful, anxious, bright",
+  },
+  {
+    category: "modern",
+    premise: "A climate activist influencer discovers their sponsor is terraforming the desert in secret",
+    timeline: "Modern era, 2026, a five-day convoy across Morocco",
+    framing: "Contemporary eco-thriller",
+    place: "Solar farms and dust highways outside Marrakech",
+    mood: "Urgent, conflicted, sun-scorched",
+  },
+  {
+    category: "modern",
+    premise: "A night-shift rideshare driver in Lagos keeps picking up passengers who know impossible details about their past",
+    timeline: "Modern era, 2026, one rain-soaked night",
+    framing: "Contemporary urban mystery",
+    place: "Neon-lit streets and flooded underpasses of Lagos",
+    mood: "Electric, skeptical, warm",
+  },
+  {
+    category: "modern",
+    premise: "A startup founder in San Francisco realizes their AI assistant is negotiating their relationships for them",
+    timeline: "Modern era, spring 2026, forty-eight hours before launch",
+    framing: "Contemporary satire",
+    place: "Glass offices and hacker-house lofts in SoMa",
+    mood: "Caffeinated, ironic, tense",
+  },
+  {
+    category: "futuristic",
+    premise: "A night-shift barista on an orbital habitat serves an alien diplomat who speaks in colors",
+    timeline: "Far future, 2240, one eighteen-hour docking shift",
+    framing: "Science fiction first contact",
+    place: "Ringhab Module Seven above Jupiter",
+    mood: "Wonder, diplomatic tension, quiet",
+  },
+  {
+    category: "futuristic",
+    premise: "A Martian colonist teenager races to save their hydroponic dome before the dust season",
+    timeline: "Near future, 2089, six sols until lockdown",
+    framing: "Hard science fiction survival",
+    place: "Red dust valleys of Valles Marineris colony",
+    mood: "Claustrophobic, hopeful, gritty",
+  },
+  {
+    category: "futuristic",
+    premise: "An interstellar courier delivers a package that screams when opened",
+    timeline: "Far future, 2512, a three-jump delivery route",
+    framing: "Space opera noir",
+    place: "Cargo bays between dying starports",
+    mood: "Cynical, curious, vast",
+  },
+  {
+    category: "futuristic",
+    premise: "A quantum physicist accidentally splits their personality across parallel timelines in a lab accident",
+    timeline: "Near future, 2039, one experiment cycle",
+    framing: "Mind-bending sci-fi",
+    place: "Underground research ring beneath Geneva",
+    mood: "Cerebral, unstable, luminous",
+  },
+  {
+    category: "futuristic",
+    premise: "An AI caretaker wakes in a museum of extinct animals after humanity silently vanishes",
+    timeline: "Post-human future, year 3000, seven days of automated routines",
+    framing: "Quiet apocalypse sci-fi",
+    place: "A domed natural history museum on a silent Earth",
+    mood: "Lonely, gentle, eerie",
+  },
+  {
+    category: "futuristic",
+    premise: "A climate refugee fleet captain navigates floating cities through acid seas",
+    timeline: "Far future, 2195, one storm season crossing",
+    framing: "Climate sci-fi epic",
+    place: "Acid-green waves and welded city-ships",
+    mood: "Epic, weary, defiant",
+  },
+  {
+    category: "futuristic",
+    premise: "A memory dealer in Neo-Tokyo sells other people's childhoods on the black market",
+    timeline: "Cyberpunk future, 2098, three nights in the neon district",
+    framing: "Cyberpunk thriller",
+    place: "Shinjuku back alleys and sky-bridge markets",
+    mood: "Neon-soaked, moral ambiguity",
+  },
+  {
+    category: "futuristic",
+    premise: "A android priest on a generation ship debates whether souls can upload",
+    timeline: "Far future, 2780, the final month before arrival",
+    framing: "Philosophical space opera",
+    place: "Cathedral vault at the ship's rotating spine",
+    mood: "Solemn, cosmic, questioning",
+  },
+  {
+    category: "retro",
+    premise: "A retired detective in 1970s Tokyo investigates crimes that happen only inside shared dreams",
+    timeline: "Late 20th century, 1978, five humid summer nights",
+    framing: "Retro noir with supernatural elements",
+    place: "Shinjuku jazz bars and tatami apartments",
+    mood: "Smoky, melancholic, stylish",
+  },
+  {
+    category: "retro",
+    premise: "A jazz musician in 1950s New Orleans plays a song that opens doors to the dead",
+    timeline: "Mid 20th century, 1954, one carnival week",
+    framing: "Historical magical realism",
+    place: "French Quarter clubs and foggy cemeteries",
+    mood: "Swinging, haunted, warm",
+  },
+  {
+    category: "retro",
+    premise: "A street magician in 1920s Cairo finds real magic leaking through a cracked tomb seal",
+    timeline: "Roaring Twenties, 1923, three nights of excavation",
+    framing: "Pulp adventure",
+    place: "Candlelit bazaars and desert dig sites",
+    mood: "Exotic, reckless, dazzling",
+  },
+  {
+    category: "retro",
+    premise: "A Hollywood stunt double wakes up as the murdered actor they impersonate",
+    timeline: "Late 20th century, 1988, one week before the Oscars",
+    framing: "Retro Hollywood thriller",
+    place: "Studio lots and hillside mansions of Los Angeles",
+    mood: "Glossy, paranoid, cinematic",
+  },
+  {
+    category: "retro",
+    premise: "A New Age wellness guru on a Bali retreat realizes one guest can actually see souls",
+    timeline: "Modern era, 2019, a ten-day retreat cycle",
+    framing: "Contemporary spiritual satire",
+    place: "Ubud jungle villas and rice terraces",
+    mood: "Serene, uncanny, lush",
+  },
+  {
+    category: "historical",
+    premise: "A Regency-era governess inherits a haunted estate that rewrites itself each dawn",
+    timeline: "Regency England, 1814, one fortnight in the countryside",
+    framing: "Historical gothic romance",
+    place: "A mist-wrapped manor in the Cotswolds",
+    mood: "Proper, eerie, romantic",
+  },
+  {
+    category: "historical",
+    premise: "A samurai's child in Edo-period Japan carries a letter that could start a war",
+    timeline: "Edo period, 1803, ten days on the Tōkaidō road",
+    framing: "Historical adventure",
+    place: "Post towns and pine forests of feudal Japan",
+    mood: "Disciplined, urgent, poetic",
+  },
+  {
+    category: "historical",
+    premise: "A witch trial survivor in 1600s Salem runs a hidden library of forbidden science",
+    timeline: "Colonial era, 1692, one winter of secrecy",
+    framing: "Historical thriller",
+    place: "Salt-stained cottages and candlelit cellars of Salem",
+    mood: "Fearful, defiant, claustrophobic",
+  },
+  {
+    category: "historical",
+    premise: "A Viking merchant's daughter brokers peace between raiders and monks during a white winter",
+    timeline: "Viking Age, 986 CE, one blizzard-bound month",
+    framing: "Historical saga",
+    place: "A frozen fjord trading hall in Norway",
+    mood: "Harsh, honorable, windswept",
+  },
+  {
+    category: "historical",
+    premise: "A medieval blacksmith's apprentice hides a forbidden clockwork heart from the inquisitors",
+    timeline: "Medieval Europe, 1240s, nine days before the inspection",
+    framing: "Historical fiction with clockpunk elements",
+    place: "A soot-dark forge town in the Rhineland",
+    mood: "Tense, inventive, candlelit",
+  },
+  {
+    category: "historical",
+    premise: "A circus runaway in Victorian London joins a secret society of inventors",
+    timeline: "Victorian era, 1887, one exhibition season",
+    framing: "Steampunk historical adventure",
+    place: "Gaslit London rooftops and hidden workshops",
+    mood: "Whimsical, daring, foggy",
+  },
+  {
+    category: "ancient",
+    premise: "A Bronze Age village child befriends a stray god disguised as a wounded wolf",
+    timeline: "Bronze Age, 1150 BCE, three moonlit nights",
+    framing: "Mythic historical fiction",
+    place: "A river settlement in Anatolia",
+    mood: "Primal, wonder-filled, fierce",
+  },
+  {
+    category: "ancient",
+    premise: "A palace scribe in ancient Mesopotamia must forge a peace treaty between rival kings",
+    timeline: "Ancient Mesopotamia, 1750 BCE, seven days of negotiation",
+    framing: "Epic historical drama",
+    place: "Ziggurat courts under a merciless sun",
+    mood: "Weighty, diplomatic, dusty",
+  },
+  {
+    category: "ancient",
+    premise: "A desert nomad on the Silk Road guides a stranger who never casts a shadow",
+    timeline: "Classical antiquity, 200 BCE, a caravan crossing of forty days",
+    framing: "Legendary road epic",
+    place: "Salt flats and oasis caravanserais of Central Asia",
+    mood: "Mythic, patient, sun-beaten",
+  },
 ];
+
+/** Fully distinct story concepts — legacy list kept for reference; blueprints are authoritative. */
+const STORY_PREMISES = STORY_BLUEPRINTS.map((b) => b.premise);
 
 const TRAIT_THEMES: Record<string, string> = {
   extraversion: "social energy, speaking up, crowds vs solitude, leading vs listening",
@@ -195,15 +418,32 @@ function hashString(input: string): number {
 
 function creativeBriefForSeed(storySeed: string) {
   const h = hashString(storySeed);
-  const timelineEra = pick(TIMELINE_ERAS, h + 19);
-  const premise = pick(STORY_PREMISES, h + 23);
+  const blueprint = pick(STORY_BLUEPRINTS, h + 23);
   return {
     settingHint: pick(SETTINGS, h),
     genreHint: pick(STORY_GENRES, h + 7),
-    toneHint: pick(STORY_TONES, h + 13),
-    timelineEra,
-    premise,
+    toneHint: blueprint.mood || pick(STORY_TONES, h + 13),
+    timelineEra: blueprint.timeline,
+    premise: blueprint.premise,
+    blueprint,
     runId: storySeed.slice(0, 12),
+  };
+}
+
+function worldContextFromBlueprint(
+  blueprint: StoryBlueprint,
+  hero: string,
+  parsed?: Partial<StoryWorldContext>,
+  settingFallback?: string
+): StoryWorldContext {
+  return {
+    framing: blueprint.framing,
+    timeline: blueprint.timeline,
+    place: parsed?.place?.trim() || blueprint.place,
+    yourRole:
+      parsed?.yourRole?.trim() ||
+      `You are ${hero}, living inside this story. Every choice is yours.`,
+    mood: parsed?.mood?.trim() || blueprint.mood,
   };
 }
 
@@ -467,18 +707,8 @@ export function buildFallbackStory(
     title,
     prologue: brief.premise,
     heroName: hero,
-    setting,
-    worldContext: normalizeWorldContext(
-      {
-        framing: "Fictional — invented for this journey",
-        timeline: `${brief.timelineEra} — events unfold over several days in this period`,
-        place: setting,
-        yourRole: `You are ${hero}, living inside this premise. Every choice is yours.`,
-        mood: brief.toneHint,
-      },
-      hero,
-      setting
-    ),
+    setting: brief.blueprint.place,
+    worldContext: worldContextFromBlueprint(brief.blueprint, hero, undefined, setting),
     beats,
   };
 }
@@ -491,12 +721,14 @@ Batch 1: title, prologue (2 sentences max), heroName, setting, worldContext, bea
 Later batches: beats array only (exactly N items).
 
 worldContext (batch 1 only): {
-  "framing": "Fictional | Historical fiction | Sci-fi | Surreal dream | etc.",
-  "timeline": "MUST name era or year plus span (e.g. 'Medieval, 1240s, four days' | 'Modern, 2026, one weekend' | 'Far future, 2400, a single orbit')",
-  "place": "Specific location in that era",
+  "framing": "Match the STORY BLUEPRINT framing exactly",
+  "timeline": "Copy the EXACT timeline string from the blueprint — do not invent a different era",
+  "place": "Match the blueprint place unless the premise requires a specific sub-location",
   "yourRole": "Who the player is in THIS premise — 1-2 sentences",
-  "mood": "Overall emotional tone"
+  "mood": "Match the blueprint mood"
 }
+
+TIMELINE RULE: worldContext.timeline MUST be copied verbatim from the blueprint. Do NOT default to Medieval 1240s. Modern, retro, futuristic, and ancient eras are all valid — use what the blueprint says.
 
 Each beat must advance YOUR invented plot. Weave personality themes naturally — never mention Big Five or psychology.
 Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence), question (one line), choices (5 label+value), scenePrompt (visual, no text in image).
@@ -712,6 +944,7 @@ type StoryBatchMeta = {
   heroName: string;
   setting: string;
   premise: string;
+  blueprint: StoryBlueprint;
   worldContext: StoryWorldContext;
 };
 
@@ -798,17 +1031,22 @@ function buildBatchPrompt(
   const brief = creativeBriefForSeed(storySeed);
 
   if (batch === 0) {
+    const bp = brief.blueprint;
     return `Write a COMPLETELY ORIGINAL story. Run id: ${brief.runId}.
+Category: ${bp.category.toUpperCase()} — honor this era, NOT a default medieval fantasy.
 
-MANDATORY PREMISE — the entire plot must follow this (adapt freely but stay in this world):
-"${brief.premise}"
+STORY BLUEPRINT (authoritative — copy timeline/framing/place/mood exactly into worldContext):
+- Premise: "${bp.premise}"
+- Timeline (COPY VERBATIM into worldContext.timeline): "${bp.timeline}"
+- Framing: "${bp.framing}"
+- Place: "${bp.place}"
+- Mood: "${bp.mood}"
 
-You may reinterpret genre, era, and cast — but do NOT fall back to a generic fantasy quest.
-Timeline anchor: ${brief.timelineEra}
-Tone: ${brief.toneHint}
+The plot, characters, and scenes must match this blueprint's era (${bp.category}).
+Do NOT set the story in Medieval Europe unless the timeline above says so.
 
 Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}).
-Each beat explores a personality theme through YOUR plot (not a template journey):
+Each beat explores a personality theme through YOUR plot:
 ${JSON.stringify(personalityHints)}`;
   }
 
@@ -900,9 +1138,15 @@ async function generateStoryInBatches(
         title: parsed.title,
         prologue: parsed.prologue,
         heroName: parsed.heroName || hero,
-        setting: parsed.setting || settingHint,
+        setting: parsed.setting || brief.blueprint.place || settingHint,
         premise: brief.premise,
-        worldContext: parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || settingHint),
+        blueprint: brief.blueprint,
+        worldContext: worldContextFromBlueprint(
+          brief.blueprint,
+          parsed.heroName || hero,
+          parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || settingHint),
+          parsed.setting || settingHint
+        ),
       };
     }
 
@@ -1020,6 +1264,7 @@ export async function generateStoryJourney(
       storyFailureReason: reason,
       storySeed,
       storyPremise: brief.premise,
+      storyBlueprintCategory: brief.blueprint.category,
     },
   });
 
@@ -1044,6 +1289,7 @@ export async function generateStoryJourney(
             storyWarnings: result.warnings.length ? result.warnings : undefined,
             storySeed,
             storyPremise: brief.premise,
+            storyBlueprintCategory: brief.blueprint.category,
           },
         };
       }
