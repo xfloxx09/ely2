@@ -110,35 +110,44 @@ export type ParsedStoryResponse = {
   recovered: boolean;
 };
 
+function beatsFromJsonText(text: string): BeatLike[] | null {
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const beats = extractBeatsFromParsed(parsed);
+  return beats.length ? beats : null;
+}
+
 /** Parse LLM story JSON — tolerates trailing text, markdown fences, and truncated beat arrays. */
 export function parseStoryResponse(raw: string): ParsedStoryResponse {
   const cleaned = stripMarkdownFences(raw);
   if (!cleaned) return { beats: [], recovered: false };
 
-  const attempts: (() => BeatLike[] | null)[] = [
-    () => {
-      const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-      const beats = extractBeatsFromParsed(parsed);
-      return beats.length ? beats : null;
+  const attempts: { run: () => BeatLike[] | null; salvaged: boolean }[] = [
+    {
+      run: () => {
+        const obj = extractBalancedJson(cleaned, "{", "}");
+        if (!obj) return null;
+        return beatsFromJsonText(obj);
+      },
+      salvaged: false,
     },
-    () => {
-      const obj = extractBalancedJson(cleaned, "{", "}");
-      if (!obj) return null;
-      const parsed = JSON.parse(obj) as Record<string, unknown>;
-      const beats = extractBeatsFromParsed(parsed);
-      return beats.length ? beats : null;
+    {
+      run: () => beatsFromJsonText(cleaned),
+      salvaged: false,
     },
-    () => {
-      const salvaged = salvageBeatObjects(cleaned);
-      return salvaged.length ? salvaged : null;
+    {
+      run: () => {
+        const salvaged = salvageBeatObjects(cleaned);
+        return salvaged.length ? salvaged : null;
+      },
+      salvaged: true,
     },
   ];
 
-  for (let i = 0; i < attempts.length; i++) {
+  for (const attempt of attempts) {
     try {
-      const beats = attempts[i]!();
+      const beats = attempt.run();
       if (beats?.length) {
-        return { beats, recovered: i > 0 };
+        return { beats, recovered: attempt.salvaged };
       }
     } catch {
       /* try next strategy */

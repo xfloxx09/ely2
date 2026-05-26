@@ -411,6 +411,51 @@ function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBea
   return { beats: beats as StoryBeat[], jsonRecovered: recovered };
 }
 
+function compactBeatsForHistory(beats: StoryBeat[]): { id: number; bfiId: number; narrative: string }[] {
+  return beats.slice(0, STORY_BATCH_SIZE).map((beat) => ({
+    id: beat.id,
+    bfiId: beat.bfiId,
+    narrative: beat.narrative.slice(0, 100),
+  }));
+}
+
+async function fetchAndParseStoryBatch(options: {
+  provider: "gemini" | "openai";
+  systemPrompt: string;
+  prompt: string;
+  llmKeys: LlmKeySource | undefined;
+  batch: number;
+  chatHistory: ChatTurn[];
+}): Promise<{ parsed: ReturnType<typeof parseStoryJson>; raw: string }> {
+  const { provider, systemPrompt, prompt, llmKeys, batch, chatHistory } = options;
+  const retryHint =
+    "\n\nReturn ONLY valid compact JSON: {\"beats\":[...]} — no markdown, no text before or after the object.";
+
+  for (let parseAttempt = 0; parseAttempt < 2; parseAttempt++) {
+    const effectivePrompt = parseAttempt === 0 ? prompt : prompt + retryHint;
+    const raw =
+      batch === 0
+        ? await fetchStoryBatchSingle(provider, systemPrompt, effectivePrompt, llmKeys, batch)
+        : await fetchStoryBatchChat(
+            provider,
+            systemPrompt,
+            chatHistory.slice(-2),
+            effectivePrompt,
+            llmKeys,
+            batch
+          );
+
+    try {
+      const parsed = parseStoryJson(raw);
+      return { parsed, raw };
+    } catch (err) {
+      if (parseAttempt === 1) throw err;
+    }
+  }
+
+  throw new Error(`Batch ${batch + 1} parse failed`);
+}
+
 async function generateStoryWorld(
   provider: "gemini" | "openai",
   hero: string,
@@ -790,26 +835,27 @@ async function generateStoryInBatches(
     let parsed: Partial<StoryJourney> & { beats?: StoryBeat[]; jsonRecovered?: boolean };
     let raw = "";
     try {
-      raw =
-        batch === 0
-          ? await fetchStoryBatchSingle(provider, systemPrompt, prompt, llmKeys, batch)
-          : await fetchStoryBatchChat(
-              provider,
-              systemPrompt,
-              chatHistory.slice(-4),
-              prompt,
-              llmKeys,
-              batch
-            );
-      parsed = parseStoryJson(raw);
-      if (parsed.jsonRecovered) {
-        warnings.push(`Batch ${batch + 1} JSON was malformed; recovered ${parsed.beats?.length ?? 0} beats from partial response`);
+      ({ parsed, raw } = await fetchAndParseStoryBatch({
+        provider,
+        systemPrompt,
+        prompt,
+        llmKeys,
+        batch,
+        chatHistory,
+      }));
+
+      const llmBeatCount = parsed.beats?.length ?? 0;
+      if (parsed.jsonRecovered && llmBeatCount < STORY_BATCH_SIZE) {
+        warnings.push(
+          `Batch ${batch + 1} JSON was truncated; recovered ${llmBeatCount}/${STORY_BATCH_SIZE} beats`
+        );
         partialFill = true;
       }
+
       chatHistory.push({ role: "user", content: prompt });
       chatHistory.push({
         role: "assistant",
-        content: JSON.stringify({ beats: (parsed.beats ?? []).slice(0, STORY_BATCH_SIZE) }),
+        content: JSON.stringify({ beats: compactBeatsForHistory(parsed.beats ?? []) }),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
