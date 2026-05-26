@@ -10,6 +10,7 @@ import {
   buildMinimalWorldFallback,
   parseWorldResponse,
   storyEntropy,
+  hashString,
   type StoryWorldDraft,
 } from "./story-engine-world-gen.js";
 
@@ -112,6 +113,25 @@ function personalityBeatHints(start: number, end: number) {
     trait: q.trait,
     theme: TRAIT_THEMES[q.trait] ?? q.trait,
   }));
+}
+
+/** Fisher–Yates shuffle with a deterministic seed (stable per story + question). */
+export function shuffleStoryChoices(choices: StoryChoice[], shuffleKey: string): StoryChoice[] {
+  if (choices.length <= 1) return choices;
+
+  const result = [...choices];
+  let state = hashString(shuffleKey) >>> 0;
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [result[i], result[j]] = [result[j]!, result[i]!];
+  }
+
+  return result;
 }
 
 /** Story-flavored answers that still map to standard BFI raw scores (1–5 = agree with statement). */
@@ -355,14 +375,17 @@ export function buildFallbackStory(
     buildTraitFallbackBeat(i, hero, world.setting, world.premise)
   );
 
-  return {
-    title: world.title,
-    prologue: world.prologue,
-    heroName: hero,
-    setting: world.setting,
-    worldContext: world.worldContext,
-    beats,
-  };
+  return hydrateStoryBeats(
+    {
+      title: world.title,
+      prologue: world.prologue,
+      heroName: hero,
+      setting: world.setting,
+      worldContext: world.worldContext,
+      beats,
+    },
+    seedKey
+  );
 }
 
 const STORY_BATCH_SYSTEM_PROMPT = `You write story BEATS for an interactive personality journey. Return compact JSON only.
@@ -372,7 +395,8 @@ Return ONLY a single JSON object: {"beats":[...]} — no markdown, no commentary
 
 Keep each beat compact: narrative one short sentence, scenePrompt under 12 words, choice labels under 10 words.
 Each beat: id, bfiId, trait, chapter, chapterTitle, narrative, question, choices (5 label+value), scenePrompt.
-Choice values 5,4,3,2,1 once each. Never mention Big Five or psychology.`;
+Each choice needs value 1–5 (each value once). Values encode agreement strength — list order does not matter.
+Never mention Big Five or psychology.`;
 
 function scenePromptFromBeat(setting: string, chapter: number, narrative: string): string {
   const detail = narrative.slice(0, 100).replace(/["']/g, "");
@@ -898,14 +922,17 @@ async function generateStoryInBatches(
   }
 
   return {
-    journey: hydrateStoryBeats({
-      title: meta.title,
-      prologue: meta.prologue,
-      heroName: meta.heroName,
-      setting: meta.setting,
-      worldContext: meta.worldContext,
-      beats: allBeats,
-    }),
+    journey: hydrateStoryBeats(
+      {
+        title: meta.title,
+        prologue: meta.prologue,
+        heroName: meta.heroName,
+        setting: meta.setting,
+        worldContext: meta.worldContext,
+        beats: allBeats,
+      },
+      storySeed
+    ),
     warnings,
     partialFill,
     worldDraft,
@@ -916,20 +943,22 @@ function normalizeBeatChoices(
   beat: StoryBeat,
   question: BFIQuestion,
   hero: string,
-  index: number
+  index: number,
+  storySeed?: string
 ): StoryChoice[] {
+  const shuffleKey = `${storySeed ?? "story"}:${beat.bfiId}`;
   const choices = beat.choices;
   if (choices?.length === 5) {
     const values = choices.map((c) => c.value).sort((a, b) => a - b);
     const valid = values.join(",") === "1,2,3,4,5" && choices.every((c) => c.label?.trim());
     if (valid) {
-      return [...choices].sort((a, b) => b.value - a.value);
+      return shuffleStoryChoices(choices, shuffleKey);
     }
   }
   return contextualStoryChoices(question, hero, index);
 }
 
-function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
+function hydrateStoryBeats(journey: StoryJourney, storySeed?: string): StoryJourney {
   const hero = journey.heroName || "You";
   const setting = journey.setting || "the story world";
 
@@ -953,7 +982,7 @@ function hydrateStoryBeats(journey: StoryJourney): StoryJourney {
         beat.scenePrompt && beat.scenePrompt.length > 10
           ? beat.scenePrompt
           : scenePromptFromBeat(setting, chapter, narrative || journey.prologue),
-      choices: normalizeBeatChoices(beat, question, hero, index),
+      choices: normalizeBeatChoices(beat, question, hero, index, storySeed),
     };
   });
 
