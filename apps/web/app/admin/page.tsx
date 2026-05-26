@@ -25,7 +25,7 @@ export default function AdminPage() {
   const [denyReason, setDenyReason] = useState<string>("");
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [llmProvider, setLlmProvider] = useState("gemini");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
+  const [geminiModel, setGeminiModel] = useState("gemini-3.1-flash-lite");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [replicateApiToken, setReplicateApiToken] = useState("");
@@ -56,7 +56,7 @@ export default function AdminPage() {
         setUsers(userList);
         setSettings(platformSettings);
         setLlmProvider(platformSettings.llmProvider || "gemini");
-        setGeminiModel(platformSettings.geminiModel || "gemini-2.5-flash");
+        setGeminiModel(platformSettings.geminiModel || "gemini-3.1-flash-lite");
       })
       .catch((err) => {
         setAuthorized((prev) => {
@@ -201,12 +201,19 @@ export default function AdminPage() {
                 onChange={(e) => setGeminiModel(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-ely-primary/50"
               >
-                <option value="gemini-2.5-flash">gemini-2.5-flash (recommended free tier)</option>
-                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (highest free RPM)</option>
+                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (best when 2.5 quota is full — 500/day)</option>
+                <option value="gemma-4-31b-it">gemma-4-31b-it (open model — 1500/day)</option>
+                <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it (open MoE — 1500/day)</option>
+                <option value="gemini-3-flash-preview">gemini-3-flash-preview (20/day only)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash (20/day — resets daily)</option>
+                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (20/day — resets daily)</option>
                 <option value="gemini-2.0-flash">gemini-2.0-flash (legacy — often limit: 0)</option>
               </select>
               <p className="mt-1.5 text-[11px] leading-relaxed text-ely-muted">
-                Fresh Google accounts often fail on 2.0-flash with quota limit 0. Use 2.5-flash. Create keys at{" "}
+                Story onboarding uses ~6 API calls per story. If 2.5 Flash / Lite show 429 or red RPD in AI Studio,
+                switch to <strong className="text-white/80">gemini-3.1-flash-lite</strong> or{" "}
+                <strong className="text-white/80">gemma-4-31b-it</strong>. Avoid image/video/Live API models for text
+                stories. Keys at{" "}
                 <a href="https://aistudio.google.com/apikey" className="text-ely-accent underline" target="_blank" rel="noreferrer">
                   AI Studio
                 </a>
