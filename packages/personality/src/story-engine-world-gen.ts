@@ -16,7 +16,16 @@ export type StoryWorldDraft = {
   worldContext: StoryWorldContextFields;
 };
 
+/** Shared voice rule for world + beat generation. */
+export const STORY_PLAIN_LANGUAGE_RULE = `Write in clear, everyday English — like a good TV show or YA novel, not a literature PhD.
+Use short sentences and common words (8th-grade reading level). Say what happened plainly.
+Avoid: rare words, long metaphors, poetic flourishes, abstract philosophy, academic tone, purple prose.
+BAD: "The ephemerality of collective memory erodes the crystalline archive."
+GOOD: "The city's shared memories are fading. If the clock hits zero, everyone forgets who they are."`;
+
 export const WORLD_GEN_SYSTEM_PROMPT = `You invent a completely original fictional story world for an interactive personality journey. Return JSON only — no markdown.
+
+${STORY_PLAIN_LANGUAGE_RULE}
 
 Every run must be unique. Invent from scratch: time period, genre, location, conflict, tone, cast.
 Valid eras include ANY of: present day, historical (any century), near future, far future, alternate history, mythic, surreal — choose freely and vary it every time.
@@ -193,7 +202,8 @@ Hero name: ${hero}
 
 Invent a brand-new story world that has never existed before in any prior run.
 Surprise the reader — combine unexpected era + genre + place.
-The hero "${hero}" is the protagonist. Make worldContext.yourRole about them.`;
+The hero "${hero}" is the protagonist. Make worldContext.yourRole about them.
+Keep all text simple and easy to read — no fancy vocabulary.`;
 }
 
 export function isValidWorldDraft(
@@ -276,9 +286,9 @@ export function buildMinimalWorldFallback(hero: string, storySeed: string): Stor
   const e = storyEntropy(storySeed);
   return {
     title: `The Unwritten Chapter of ${hero}`,
-    prologue: `${hero} stands at the edge of a story only they can finish — every choice from here shapes who they become.`,
-    setting: "A place not yet named, waiting for your decisions to define it",
-    premise: "A personal journey where each moment reveals who you truly are",
+    prologue: `${hero} is about to start a story only they can finish. Every choice from here shapes what happens next.`,
+    setting: "A place waiting for your decisions to define it",
+    premise: "A personal journey where each choice shows who you really are",
     worldContext: {
       framing: "Fictional — invented for you",
       timeline: `Unspecified era, run ${e.nonce.slice(0, 8)}, several continuous days`,

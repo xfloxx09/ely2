@@ -11,6 +11,7 @@ import {
   parseWorldResponse,
   storyEntropy,
   hashString,
+  STORY_PLAIN_LANGUAGE_RULE,
   type StoryWorldDraft,
 } from "./story-engine-world-gen.js";
 
@@ -154,135 +155,135 @@ export function contextualStoryChoices(
     extraversion: {
       forward: [
         [
-          `${h} steps into the center — the room feels like home`,
-          "More often than not, I seek the pulse of the gathering",
-          "Some evenings I shine, others I need the quiet edge",
-          "I usually watch from the sidelines and listen first",
-          "Crowds drain me — I keep my fire for smaller circles",
+          `${h} walks into the middle of the crowd — it feels right`,
+          "I usually like being around people",
+          "Sometimes I want company, sometimes I want quiet",
+          "I usually hang back and listen first",
+          "Big groups tire me out — I stick to small circles",
         ],
         [
-          "My spirit lifts the moment voices rise around me",
-          "I tend to join in and let the moment carry me",
-          "It depends — I can be social or perfectly still",
-          "I prefer listening to leading the room",
-          "Solitude restores me more than company does",
+          "I feel good when people are talking around me",
+          "I tend to join in and go with the flow",
+          "It depends — I can be social or totally quiet",
+          "I'd rather listen than lead the room",
+          "Alone time recharges me more than parties do",
         ],
       ],
       reverse: [
         [
-          "Yes — silence is my truest language",
-          "I'm usually the quiet one in any room",
-          "I speak when it counts, otherwise I stay still",
-          "People are surprised by how loud I can be",
-          "Quiet isn't me — I naturally fill the space",
+          "Yeah — I'm usually the quiet one",
+          "I'm often the person who doesn't say much",
+          "I talk when I need to, otherwise I stay quiet",
+          "People are surprised by how loud I can get",
+          "Quiet doesn't fit me — I fill the room naturally",
         ],
         [
-          "Stillness suits me better than the spotlight",
-          "I often hold back and let others take the stage",
-          "I'm social in bursts, not by default",
-          "I find myself talking more than I planned to",
-          "The idea of being 'the quiet one' doesn't fit me at all",
+          "I'm happier out of the spotlight",
+          "I let others take center stage most of the time",
+          "I'm social sometimes, not all the time",
+          "I end up talking more than I planned",
+          "Being 'the quiet one' doesn't describe me at all",
         ],
       ],
     },
     agreeableness: {
       forward: [
         [
-          "My heart moves first — I soften every fall I see",
-          "I usually extend warmth before judgment",
-          "I try to be kind, though I have my limits",
-          "I care, but I don't always show it quickly",
-          "I protect my boundaries — sympathy isn't automatic",
+          `${h} helps first — it's the obvious move`,
+          "I usually try to be kind before I judge",
+          "I'm kind, but I have limits",
+          "I care, but I don't always show it right away",
+          "I protect my space — I don't trust everyone fast",
         ],
         [
-          "Helping others feels like the obvious choice",
-          "I'm gentle with people more often than not",
+          "Helping someone out feels like the right call",
+          "I'm gentle with people most of the time",
           "I'm fair — sometimes soft, sometimes firm",
-          "I can be distant until someone earns my trust",
-          "I don't easily melt for every stranger's pain",
+          "I can be cold until someone earns my trust",
+          "I don't melt for every stranger's problems",
         ],
       ],
       reverse: [
         [
-          "I can be sharp — fault-finding comes naturally",
-          "I notice flaws in people before their gifts",
-          "I'm balanced — not harsh, not endlessly soft",
+          "I can be blunt — I notice what's wrong fast",
+          "I spot people's flaws before their good sides",
+          "I'm not harsh, but I'm not endlessly soft either",
           "I usually give people the benefit of the doubt",
-          "Finding fault in others isn't who I am",
+          "Picking faults in people isn't really my thing",
         ],
         [
-          "Conflict doesn't frighten me — I say the hard thing",
-          "I stand my ground even when it ruffles feathers",
-          "I pick my battles, but I don't always yield",
-          "I'd rather harmonize than pick a fight",
-          "Starting arguments is the opposite of my nature",
+          "I'm not afraid of conflict — I'll say the hard thing",
+          "I stand my ground even if it upsets people",
+          "I pick my fights, but I don't always back down",
+          "I'd rather keep the peace than start a fight",
+          "Starting arguments is not who I am",
         ],
       ],
     },
     conscientiousness: {
       forward: [
         [
-          "Every step is planned — order is my compass",
-          "I like a map, a list, a clear next move",
+          "Every step is planned — I like knowing what's next",
+          "I want a list, a map, a clear plan",
           "I'm organized when it matters, loose when it doesn't",
           "Structure helps, but I don't need it for everything",
-          "Plans feel like cages — I trust improvisation",
+          "Too much planning feels like a cage — I wing it",
         ],
         [
-          "Reliability is simply who I am on the road",
-          "I follow through more often than I drift",
-          "I'm steady, though not rigid about every detail",
-          "Deadlines slip sometimes — I'm human",
-          "Discipline and I are occasional acquaintances",
+          "People can count on me to follow through",
+          "I finish what I start more often than not",
+          "I'm steady, but not rigid about every little thing",
+          "Deadlines slip sometimes — I'm only human",
+          "Discipline and I aren't exactly best friends",
         ],
       ],
       reverse: [
         [
-          "Mess and I are old companions — yes, that's me",
-          "I leave things half-done more than I'd admit",
-          "I'm organized in some corners, chaotic in others",
-          "I usually tidy up and finish what I start",
+          "Messy and me go way back — yeah, that's me",
+          "I leave things half-done more than I'd like",
+          "I'm tidy in some areas, a disaster in others",
+          "I usually clean up and finish what I start",
           "Disorganized doesn't describe me at all",
         ],
         [
-          "I drift — structure rarely sticks for long",
-          "Lazy moments win more often than I wish",
-          "I work in waves, not steady lines",
-          "I'm more dependable than people expect",
-          "Calling me lazy would be completely wrong",
+          "I drift — routines rarely stick",
+          "Lazy moments win more than I'd admit",
+          "I work in bursts, not steady lines",
+          "I'm more reliable than people expect",
+          "Calling me lazy would be totally wrong",
         ],
       ],
     },
     neuroticism: {
       forward: [
         [
-          "The storm inside me is familiar — worry runs deep",
-          "I feel tides of mood and tension often",
-          "Stress visits, but I don't always surrender to it",
-          "I usually find calm after the first surge",
-          "Setbacks rarely shake me — I recover quickly",
+          "Worry is familiar — stress gets to me",
+          "My mood shifts and tension shows up often",
+          "Stress hits, but I don't always fall apart",
+          "I usually calm down after the first wave",
+          "Setbacks don't shake me much — I bounce back fast",
         ],
         [
-          "Anxiety hums beneath my skin most days",
-          "I tense up when the ground shifts unexpectedly",
-          "I'm sensitive, but not ruled by every fear",
+          "I feel anxious more days than not",
+          "I tense up when things change suddenly",
+          "I'm sensitive, but fear doesn't run my life",
           "Pressure comes and goes without owning me",
-          "I'm steady inside — turmoil is rare",
+          "Inside I'm steady — real turmoil is rare",
         ],
       ],
       reverse: [
         [
-          "Setbacks flatten me — optimism takes time to return",
+          "Bad news hits hard — optimism takes time",
           "I struggle to bounce back when things go wrong",
-          "I recover, but not without a bruise to my spirit",
-          "I usually rise again with reasonable speed",
-          "Optimism after failure is simply how I'm built",
+          "I recover, but it leaves a mark",
+          "I usually get back up at a normal pace",
+          "Staying hopeful after failure is just how I work",
         ],
         [
-          "Calm is my baseline, even when skies darken",
-          "Tension rarely takes the wheel for long",
+          "Calm is my default, even when things get bad",
+          "Stress doesn't take over for long",
           "I'm composed most days, shaken on others",
-          "I feel stress more than I show it",
+          "I feel stress more than I let on",
           "Calling me tense would miss who I really am",
         ],
       ],
@@ -290,34 +291,34 @@ export function contextualStoryChoices(
     openness: {
       forward: [
         [
-          "Wonder pulls me forward — the strange is welcome",
+          "New and weird stuff pulls me in — I like it",
           "I chase new ideas, art, and unfamiliar paths",
-          "I'm curious, though I still love what's known",
-          "Novelty intrigues me in small doses",
-          "The familiar ground feels safer than the unknown",
+          "I'm curious, but I still love what's familiar",
+          "New things interest me in small doses",
+          "The familiar feels safer than the unknown",
         ],
         [
-          "Invention lives in me — I reimagine everything",
-          "I lean into creativity and complex ideas",
-          "I'm open-minded, but not endlessly restless",
-          "I appreciate depth, yet prefer practical ground",
-          "Routine and simplicity suit me better than novelty",
+          "I like rethinking things and trying new angles",
+          "I lean into creativity and big ideas",
+          "I'm open-minded, but not restless 24/7",
+          "I like depth, but I prefer practical stuff too",
+          "Routine and simple beats novelty for me",
         ],
       ],
       reverse: [
         [
-          "Art and abstraction barely whisper to me",
-          "I rarely wander into imaginative territory",
+          "Art and abstract stuff rarely grab me",
+          "I don't often get lost in imaginative daydreams",
           "Beauty matters, but I don't live for abstract art",
-          "I enjoy creative things more than I expect to",
-          "Few artistic interests? That couldn't be less true",
+          "I enjoy creative things more than I expect",
+          "Saying I have no artistic interests? Dead wrong",
         ],
         [
-          "The practical world holds my attention, not poetry",
-          "I don't often lose myself in artistic daydreams",
+          "Practical stuff holds my attention, not poetry",
+          "I don't usually drift into artistic fantasies",
           "I'm curious about some creative things, not all",
-          "Unexpected ideas often catch my interest",
-          "Saying I'm uninterested in art misses who I am",
+          "Random new ideas often catch my interest",
+          "I'm more into art and ideas than that suggests",
         ],
       ],
     },
@@ -334,13 +335,13 @@ function normalizeWorldContext(
   setting: string
 ): StoryWorldContext {
   return {
-    framing: raw?.framing?.trim() || "A fictional fable — symbolic and immersive, not literal history",
-    timeline: raw?.timeline?.trim() || "Modern era — present day, over a few continuous days",
+    framing: raw?.framing?.trim() || "A fictional story — not real history",
+    timeline: raw?.timeline?.trim() || "Present day, over a few days",
     place: raw?.place?.trim() || setting,
     yourRole:
       raw?.yourRole?.trim() ||
-      `You are ${hero}, the protagonist. Read each moment as if you are living it and choose what you would do.`,
-    mood: raw?.mood?.trim() || "Reflective, wonder-filled, grounded",
+      `You are ${hero}, the main character. Read each scene and pick what you'd do.`,
+    mood: raw?.mood?.trim() || "Curious, a little tense",
   };
 }
 
@@ -390,10 +391,12 @@ export function buildFallbackStory(
 
 const STORY_BATCH_SYSTEM_PROMPT = `You write story BEATS for an interactive personality journey. Return compact JSON only.
 
+${STORY_PLAIN_LANGUAGE_RULE}
+
 The story world (title, era, place, premise) is ALREADY defined — do not change it.
 Return ONLY a single JSON object: {"beats":[...]} — no markdown, no commentary after the JSON.
 
-Keep each beat compact: narrative one short sentence, scenePrompt under 12 words, choice labels under 10 words.
+Keep each beat compact: narrative = one short plain sentence (≤20 words); question = simple and direct; choice labels = how people actually talk (≤12 words).
 Each beat: id, bfiId, trait, chapter, chapterTitle, narrative, question, choices (5 label+value), scenePrompt.
 Each choice needs value 1–5 (each value once). Values encode agreement strength — list order does not matter.
 Never mention Big Five or psychology.`;
@@ -418,8 +421,8 @@ function buildTraitFallbackBeat(
     trait: q.trait,
     chapter,
     chapterTitle: CHAPTER_TITLES[chapter - 1] || `Chapter ${chapter}`,
-    narrative: `Within "${premise.slice(0, 70)}…", ${hero} faces a moment shaped by ${theme}.`,
-    question: `Standing in this situation, what would ${hero} do?`,
+    narrative: `In this story, ${hero} hits a moment about ${theme}.`,
+    question: `What would ${hero} do here?`,
     choices: contextualStoryChoices(q, hero, globalIndex),
     scenePrompt: scenePromptFromBeat(setting, chapter, premise),
   };
@@ -784,6 +787,7 @@ Setting: ${meta.setting}
 World context: ${JSON.stringify(meta.worldContext)}
 
 Write the OPENING ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}) that launch THIS specific story.
+Use simple, everyday words in every narrative, question, and choice label.
 Return JSON ONLY: {"beats":[...]}
 
 Personality themes to weave into your plot:
@@ -800,6 +804,7 @@ Recent plot: ${storySoFar.slice(-600) || "Story just started."}
 
 Return JSON ONLY: {"beats":[...]}
 Exactly ${STORY_BATCH_SIZE} beats, ids ${start + 1}-${end}. Same world, same characters, new plot events.
+Write plainly — short sentences, common words, no literary flourishes.
 
 Personality themes for these beats:
 ${JSON.stringify(personalityHints)}`;
