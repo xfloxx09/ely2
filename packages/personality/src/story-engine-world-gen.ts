@@ -1,3 +1,5 @@
+import { extractBalancedJson } from "./story-json-parse.js";
+
 export type StoryWorldContextFields = {
   framing: string;
   timeline: string;
@@ -20,6 +22,9 @@ Every run must be unique. Invent from scratch: time period, genre, location, con
 Valid eras include ANY of: present day, historical (any century), near future, far future, alternate history, mythic, surreal — choose freely and vary it every time.
 Do NOT default to medieval Europe, generic fantasy quests, blank maps, mirror pools, or lantern journeys.
 
+Keep every string concise (title ≤6 words; prologue ≤2 short sentences; each worldContext field ≤20 words).
+Return compact JSON only — no trailing commentary.
+
 Output JSON shape:
 {
   "title": "original title",
@@ -34,6 +39,134 @@ Output JSON shape:
     "mood": "overall emotional tone"
   }
 }`;
+
+function stripMarkdownFences(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+}
+
+function unescapeJsonString(s: string): string {
+  return s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+}
+
+function extractJsonStringField(raw: string, key: string, allowPartial = false): string | undefined {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const full = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "s");
+  const match = raw.match(full);
+  if (match?.[1] !== undefined) {
+    try {
+      return JSON.parse(`"${match[1]}"`);
+    } catch {
+      return unescapeJsonString(match[1]);
+    }
+  }
+  if (allowPartial) {
+    const partial = new RegExp(`"${escapedKey}"\\s*:\\s*"([^"]*)`, "s");
+    const partialMatch = raw.match(partial);
+    if (partialMatch?.[1] && partialMatch[1].length > 2) {
+      return unescapeJsonString(partialMatch[1]);
+    }
+  }
+  return undefined;
+}
+
+function extractWorldContextPartial(raw: string): Partial<StoryWorldContextFields> {
+  const wcIdx = raw.indexOf('"worldContext"');
+  if (wcIdx < 0) return {};
+
+  const braceIdx = raw.indexOf("{", wcIdx);
+  if (braceIdx >= 0) {
+    const obj = extractBalancedJson(raw, "{", "}", braceIdx);
+    if (obj) {
+      try {
+        return JSON.parse(obj) as Partial<StoryWorldContextFields>;
+      } catch {
+        /* fall through to field salvage */
+      }
+    }
+  }
+
+  const slice = raw.slice(wcIdx);
+  return {
+    framing: extractJsonStringField(slice, "framing", true),
+    timeline: extractJsonStringField(slice, "timeline", true),
+    place: extractJsonStringField(slice, "place", true),
+    yourRole: extractJsonStringField(slice, "yourRole", true),
+    mood: extractJsonStringField(slice, "mood", true),
+  };
+}
+
+export type ParsedWorldResponse = {
+  draft: StoryWorldDraft | null;
+  recovered: boolean;
+};
+
+/** Parse LLM world JSON — tolerates truncated responses and missing nested fields. */
+export function parseWorldResponse(raw: string, hero: string): ParsedWorldResponse {
+  const cleaned = stripMarkdownFences(raw);
+  if (!cleaned) return { draft: null, recovered: false };
+
+  const fromObject = (parsed: Record<string, unknown>, recovered: boolean): ParsedWorldResponse | null => {
+    if (isValidWorldDraft(parsed, hero)) {
+      return { draft: draftFromParsed(parsed, hero), recovered };
+    }
+    const title = typeof parsed.title === "string" ? parsed.title : undefined;
+    const prologue = typeof parsed.prologue === "string" ? parsed.prologue : undefined;
+    if (title && title.length > 3 && prologue && prologue.length > 15) {
+      return { draft: draftFromPartial(parsed, hero), recovered: true };
+    }
+    return null;
+  };
+
+  const strategies: (() => ParsedWorldResponse | null)[] = [
+    () => {
+      try {
+        return fromObject(JSON.parse(cleaned) as Record<string, unknown>, false);
+      } catch {
+        return null;
+      }
+    },
+    () => {
+      try {
+        const obj = extractBalancedJson(cleaned, "{", "}");
+        if (!obj) return null;
+        return fromObject(JSON.parse(obj) as Record<string, unknown>, true);
+      } catch {
+        return null;
+      }
+    },
+    () => {
+      const title = extractJsonStringField(cleaned, "title", true);
+      const prologue = extractJsonStringField(cleaned, "prologue", true);
+      if (!title || title.length <= 3 || !prologue || prologue.length <= 15) return null;
+
+      const wc = extractWorldContextPartial(cleaned);
+      return {
+        draft: draftFromPartial(
+          {
+            title,
+            prologue,
+            setting: extractJsonStringField(cleaned, "setting", true),
+            premise: extractJsonStringField(cleaned, "premise", true),
+            worldContext: wc,
+          },
+          hero
+        ),
+        recovered: true,
+      };
+    },
+  ];
+
+  for (const strategy of strategies) {
+    const result = strategy();
+    if (result?.draft) return result;
+  }
+
+  return { draft: null, recovered: false };
+}
 
 export function hashString(input: string): number {
   return input.split("").reduce((acc, char, index) => acc + char.charCodeAt(0) * (index + 1), 0);
@@ -108,6 +241,33 @@ export function draftFromParsed(
         wc.yourRole?.trim() ||
         `You are ${hero}, the protagonist. Read each moment as if you are living it.`,
       mood: wc.mood!.trim(),
+    },
+  };
+}
+
+export function draftFromPartial(parsed: Record<string, unknown>, hero: string): StoryWorldDraft {
+  const wc = (parsed.worldContext as Partial<StoryWorldContextFields> | undefined) ?? {};
+  const title = String(parsed.title || "").trim();
+  const prologue = String(parsed.prologue || "").trim();
+  const setting = String(parsed.setting || wc.place || "An original setting").trim();
+  const premise = String(parsed.premise || "A journey where every choice reveals who you are").trim();
+
+  return {
+    title: title.length > 3 ? title : `The Story of ${hero}`,
+    prologue:
+      prologue.length > 15
+        ? prologue
+        : `${hero} enters a world only they can navigate — every choice from here shapes who they become.`,
+    setting,
+    premise,
+    worldContext: {
+      framing: wc.framing?.trim() || "Fictional",
+      timeline: wc.timeline?.trim() || "Present day, several continuous days",
+      place: wc.place?.trim() || setting,
+      yourRole:
+        wc.yourRole?.trim() ||
+        `You are ${hero}, the protagonist. Read each moment as if you are living it.`,
+      mood: wc.mood?.trim() || "Reflective, uncertain",
     },
   };
 }

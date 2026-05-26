@@ -8,8 +8,7 @@ import {
   WORLD_GEN_SYSTEM_PROMPT,
   buildWorldGenPrompt,
   buildMinimalWorldFallback,
-  draftFromParsed,
-  isValidWorldDraft,
+  parseWorldResponse,
   storyEntropy,
   type StoryWorldDraft,
 } from "./story-engine-world-gen.js";
@@ -417,16 +416,16 @@ async function generateStoryWorld(
   hero: string,
   storySeed: string,
   llmKeys: LlmKeySource | undefined
-): Promise<StoryWorldDraft> {
+): Promise<{ draft: StoryWorldDraft; worldRecovered: boolean; worldWarnings: string[] }> {
   const prompt = buildWorldGenPrompt(hero, storySeed);
-  let lastError = "world generation failed";
+  const worldWarnings: string[] = [];
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const temperature = 1 + attempt * 0.05;
       const retryHint =
         attempt > 0
-          ? "\n\nYour last concept was too generic or repetitive. Invent something radically different — new era, new genre, new place."
+          ? "\n\nYour last response was invalid or truncated. Return minimal compact JSON only — short strings, complete the object."
           : "";
       const raw =
         provider === "gemini"
@@ -434,24 +433,34 @@ async function generateStoryWorld(
               system: WORLD_GEN_SYSTEM_PROMPT,
               prompt: prompt + retryHint,
               temperature,
-              maxTokens: 4096,
+              maxTokens: 8192,
               json: true,
               apiKey: llmKeys?.geminiKey ?? undefined,
               model: llmKeys?.geminiModel ?? undefined,
             })
           : await callStoryLlmOpenAi(WORLD_GEN_SYSTEM_PROMPT, prompt + retryHint, llmKeys, temperature);
 
-      const parsed = parseStoryJson(raw) as Record<string, unknown>;
-      if (isValidWorldDraft(parsed, hero)) {
-        return draftFromParsed(parsed, hero);
+      const { draft, recovered } = parseWorldResponse(raw, hero);
+      if (draft) {
+        if (recovered) {
+          worldWarnings.push("World JSON was truncated or malformed; recovered partial fields");
+        }
+        return { draft, worldRecovered: recovered, worldWarnings };
       }
-      lastError = "world JSON missing required fields";
+      worldWarnings.push(`World attempt ${attempt + 1}: JSON missing usable title/prologue`);
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      worldWarnings.push(
+        `World attempt ${attempt + 1}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
-  throw new Error(lastError);
+  worldWarnings.push("World generation failed after retries; using minimal shell");
+  return {
+    draft: buildMinimalWorldFallback(hero, storySeed),
+    worldRecovered: false,
+    worldWarnings,
+  };
 }
 
 type StoryBatchMeta = {
@@ -741,19 +750,18 @@ async function generateStoryInBatches(
   storySeed: string
 ): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean; worldDraft: StoryWorldDraft } | null> {
   const hero = userName || "Traveler";
-  let worldDraft: StoryWorldDraft;
-  try {
-    worldDraft = await generateStoryWorld(provider, hero, storySeed, llmKeys);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`World generation failed: ${msg}`);
-  }
+  const { draft: worldDraft, worldRecovered, worldWarnings } = await generateStoryWorld(
+    provider,
+    hero,
+    storySeed,
+    llmKeys
+  );
 
   let meta: StoryBatchMeta = metaFromWorldDraft(worldDraft, hero);
   const allBeats: StoryBeat[] = [];
   let storySoFar = "";
-  const warnings: string[] = [];
-  let partialFill = false;
+  const warnings: string[] = [...worldWarnings];
+  let partialFill = worldRecovered;
 
   const systemPrompt = STORY_BATCH_SYSTEM_PROMPT.replaceAll("N", String(STORY_BATCH_SIZE));
   const chatHistory: ChatTurn[] = [];
