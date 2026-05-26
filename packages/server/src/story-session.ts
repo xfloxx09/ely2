@@ -9,7 +9,7 @@ import {
 import type { LlmKeySource } from "@ely/personality";
 
 /** Bump when story generation logic changes — invalidates cached onboarding drafts. */
-export const STORY_ENGINE_VERSION = 3;
+export const STORY_ENGINE_VERSION = 4;
 
 export type StoryDraft = StoryJourney & {
   id: string;

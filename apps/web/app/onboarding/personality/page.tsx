@@ -47,7 +47,6 @@ type StoryJourney = {
     storyModel?: string;
     storySeed?: string;
     storyPremise?: string;
-    storyBlueprintCategory?: string;
     providerResolved?: "gemini" | "openai" | null;
     storyFailureReason?: string;
     storyPartialFill?: boolean;
@@ -452,7 +451,6 @@ export default function PersonalityOnboarding() {
               {" · "}
               Story: {story._debug.storySource} ({story._debug.storyModel})
               {story._debug.storySeed ? ` · seed: ${story._debug.storySeed.slice(0, 8)}` : ""}
-              {story._debug.storyBlueprintCategory ? ` · era: ${story._debug.storyBlueprintCategory}` : ""}
               {story._debug.storyPremise ? (
                 <>
                   <br />

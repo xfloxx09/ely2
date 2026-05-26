@@ -1,6 +1,15 @@
 import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
 import { geminiGenerateText, geminiChatCompletion, resolveLlmProviderChain, type LlmKeySource, type GeminiMessage } from "./gemini.js";
+import {
+  WORLD_GEN_SYSTEM_PROMPT,
+  buildWorldGenPrompt,
+  buildMinimalWorldFallback,
+  draftFromParsed,
+  isValidWorldDraft,
+  storyEntropy,
+  type StoryWorldDraft,
+} from "./story-engine-world-gen.js";
 
 export type StoryChoice = {
   label: string;
@@ -46,7 +55,6 @@ export type StoryGenerationDebug = {
   storyWarnings?: string[];
   storySeed?: string;
   storyPremise?: string;
-  storyBlueprintCategory?: string;
 };
 
 export type StoryGenerationOptions = {
@@ -74,319 +82,6 @@ export function createStorySeed(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-const SETTINGS = [
-  "a misty coastal town where lanterns glow at dusk",
-  "an ancient library that breathes with living ink",
-  "a floating garden above the clouds",
-  "a midnight train crossing forgotten stars",
-  "a quiet city where dreams leak into the streets",
-  "a rain-slick neon district after the last tram",
-  "a sun-baked desert caravan route between red mesas",
-  "a bioluminescent reef city beneath glass domes",
-  "a mountain monastery where wind carries old songs",
-  "a reclaimed space station orbiting a violet gas giant",
-  "a medieval market town on the eve of a comet",
-  "a sleepy lakeside village in perpetual golden hour",
-  "an underground jazz club built in a converted vault",
-  "a bamboo forest path lit by fireflies at twilight",
-  "a polar research outpost during the endless night",
-];
-
-const STORY_GENRES = [
-  "intimate character drama",
-  "gentle mystery with wonder",
-  "survival journey with heart",
-  "magical realism in everyday life",
-  "soft sci-fi exploration",
-  "historical adventure",
-  "dreamlike allegory",
-  "cozy fantasy road tale",
-  "noir-tinged investigation",
-  "coming-of-age odyssey",
-];
-
-const STORY_TONES = [
-  "hopeful and curious",
-  "melancholic but warm",
-  "playful and surreal",
-  "grounded and reflective",
-  "tense yet compassionate",
-  "mythic and lyrical",
-];
-
-const TIMELINE_ERAS = [
-  "Modern era — 2026",
-  "Near future — 2087",
-  "Late 20th century — 1989",
-  "Victorian era — 1880s",
-  "Industrial Revolution — 1840s",
-  "Age of Sail — 1770s",
-  "Renaissance — 1520s",
-  "Medieval period — 1240s",
-  "Iron Age — 600 BCE",
-  "Bronze Age — 1200 BCE",
-  "Ancient Egypt — 1400 BCE",
-  "Classical antiquity — 430 BCE",
-  "Mythic prehistory — timeless, before written history",
-  "Post-apocalyptic future — 50 years after the collapse",
-];
-
-type StoryBlueprint = {
-  category: "modern" | "retro" | "historical" | "futuristic" | "ancient";
-  premise: string;
-  timeline: string;
-  framing: string;
-  place: string;
-  mood: string;
-};
-
-/** Premise + timeline + place are locked together so the LLM cannot default to medieval every run. */
-const STORY_BLUEPRINTS: StoryBlueprint[] = [
-  {
-    category: "modern",
-    premise: "A wealthy teenager in Monaco discovers their life is being live-streamed to an unknown audience",
-    timeline: "Modern era, March 2026, one volatile weekend",
-    framing: "Contemporary literary fiction",
-    place: "Monte Carlo marina towers and private yacht decks",
-    mood: "Glamorous, paranoid, sharp",
-  },
-  {
-    category: "modern",
-    premise: "A hospice nurse in Dublin begins receiving voicemails from patients who have not been born yet",
-    timeline: "Present day, autumn 2025, four consecutive night shifts",
-    framing: "Contemporary magical realism",
-    place: "A public hospital on the River Liffey",
-    mood: "Tender, uncanny, grounded",
-  },
-  {
-    category: "modern",
-    premise: "A Michelin chef's protégé in Seoul cooks meals that force diners to relive forgotten memories",
-    timeline: "Modern era, 2026, three dinner services",
-    framing: "Contemporary drama with a surreal edge",
-    place: "A basement tasting kitchen in Gangnam",
-    mood: "Intimate, intense, sensory",
-  },
-  {
-    category: "modern",
-    premise: "A professional esports player is trapped inside their favorite game during a live tournament blackout",
-    timeline: "Modern era, July 2026, one sleepless tournament day",
-    framing: "Near-contemporary techno-thriller",
-    place: "A sold-out arena and the game's neon megacity",
-    mood: "Adrenaline, disorientation, wit",
-  },
-  {
-    category: "modern",
-    premise: "A suburban teenager finds a phone app that trades emotions like cryptocurrency",
-    timeline: "Modern era, 2026, one chaotic week of school",
-    framing: "Contemporary YA sci-fi",
-    place: "American suburb, mall, and rooftop parties",
-    mood: "Playful, anxious, bright",
-  },
-  {
-    category: "modern",
-    premise: "A climate activist influencer discovers their sponsor is terraforming the desert in secret",
-    timeline: "Modern era, 2026, a five-day convoy across Morocco",
-    framing: "Contemporary eco-thriller",
-    place: "Solar farms and dust highways outside Marrakech",
-    mood: "Urgent, conflicted, sun-scorched",
-  },
-  {
-    category: "modern",
-    premise: "A night-shift rideshare driver in Lagos keeps picking up passengers who know impossible details about their past",
-    timeline: "Modern era, 2026, one rain-soaked night",
-    framing: "Contemporary urban mystery",
-    place: "Neon-lit streets and flooded underpasses of Lagos",
-    mood: "Electric, skeptical, warm",
-  },
-  {
-    category: "modern",
-    premise: "A startup founder in San Francisco realizes their AI assistant is negotiating their relationships for them",
-    timeline: "Modern era, spring 2026, forty-eight hours before launch",
-    framing: "Contemporary satire",
-    place: "Glass offices and hacker-house lofts in SoMa",
-    mood: "Caffeinated, ironic, tense",
-  },
-  {
-    category: "futuristic",
-    premise: "A night-shift barista on an orbital habitat serves an alien diplomat who speaks in colors",
-    timeline: "Far future, 2240, one eighteen-hour docking shift",
-    framing: "Science fiction first contact",
-    place: "Ringhab Module Seven above Jupiter",
-    mood: "Wonder, diplomatic tension, quiet",
-  },
-  {
-    category: "futuristic",
-    premise: "A Martian colonist teenager races to save their hydroponic dome before the dust season",
-    timeline: "Near future, 2089, six sols until lockdown",
-    framing: "Hard science fiction survival",
-    place: "Red dust valleys of Valles Marineris colony",
-    mood: "Claustrophobic, hopeful, gritty",
-  },
-  {
-    category: "futuristic",
-    premise: "An interstellar courier delivers a package that screams when opened",
-    timeline: "Far future, 2512, a three-jump delivery route",
-    framing: "Space opera noir",
-    place: "Cargo bays between dying starports",
-    mood: "Cynical, curious, vast",
-  },
-  {
-    category: "futuristic",
-    premise: "A quantum physicist accidentally splits their personality across parallel timelines in a lab accident",
-    timeline: "Near future, 2039, one experiment cycle",
-    framing: "Mind-bending sci-fi",
-    place: "Underground research ring beneath Geneva",
-    mood: "Cerebral, unstable, luminous",
-  },
-  {
-    category: "futuristic",
-    premise: "An AI caretaker wakes in a museum of extinct animals after humanity silently vanishes",
-    timeline: "Post-human future, year 3000, seven days of automated routines",
-    framing: "Quiet apocalypse sci-fi",
-    place: "A domed natural history museum on a silent Earth",
-    mood: "Lonely, gentle, eerie",
-  },
-  {
-    category: "futuristic",
-    premise: "A climate refugee fleet captain navigates floating cities through acid seas",
-    timeline: "Far future, 2195, one storm season crossing",
-    framing: "Climate sci-fi epic",
-    place: "Acid-green waves and welded city-ships",
-    mood: "Epic, weary, defiant",
-  },
-  {
-    category: "futuristic",
-    premise: "A memory dealer in Neo-Tokyo sells other people's childhoods on the black market",
-    timeline: "Cyberpunk future, 2098, three nights in the neon district",
-    framing: "Cyberpunk thriller",
-    place: "Shinjuku back alleys and sky-bridge markets",
-    mood: "Neon-soaked, moral ambiguity",
-  },
-  {
-    category: "futuristic",
-    premise: "A android priest on a generation ship debates whether souls can upload",
-    timeline: "Far future, 2780, the final month before arrival",
-    framing: "Philosophical space opera",
-    place: "Cathedral vault at the ship's rotating spine",
-    mood: "Solemn, cosmic, questioning",
-  },
-  {
-    category: "retro",
-    premise: "A retired detective in 1970s Tokyo investigates crimes that happen only inside shared dreams",
-    timeline: "Late 20th century, 1978, five humid summer nights",
-    framing: "Retro noir with supernatural elements",
-    place: "Shinjuku jazz bars and tatami apartments",
-    mood: "Smoky, melancholic, stylish",
-  },
-  {
-    category: "retro",
-    premise: "A jazz musician in 1950s New Orleans plays a song that opens doors to the dead",
-    timeline: "Mid 20th century, 1954, one carnival week",
-    framing: "Historical magical realism",
-    place: "French Quarter clubs and foggy cemeteries",
-    mood: "Swinging, haunted, warm",
-  },
-  {
-    category: "retro",
-    premise: "A street magician in 1920s Cairo finds real magic leaking through a cracked tomb seal",
-    timeline: "Roaring Twenties, 1923, three nights of excavation",
-    framing: "Pulp adventure",
-    place: "Candlelit bazaars and desert dig sites",
-    mood: "Exotic, reckless, dazzling",
-  },
-  {
-    category: "retro",
-    premise: "A Hollywood stunt double wakes up as the murdered actor they impersonate",
-    timeline: "Late 20th century, 1988, one week before the Oscars",
-    framing: "Retro Hollywood thriller",
-    place: "Studio lots and hillside mansions of Los Angeles",
-    mood: "Glossy, paranoid, cinematic",
-  },
-  {
-    category: "retro",
-    premise: "A New Age wellness guru on a Bali retreat realizes one guest can actually see souls",
-    timeline: "Modern era, 2019, a ten-day retreat cycle",
-    framing: "Contemporary spiritual satire",
-    place: "Ubud jungle villas and rice terraces",
-    mood: "Serene, uncanny, lush",
-  },
-  {
-    category: "historical",
-    premise: "A Regency-era governess inherits a haunted estate that rewrites itself each dawn",
-    timeline: "Regency England, 1814, one fortnight in the countryside",
-    framing: "Historical gothic romance",
-    place: "A mist-wrapped manor in the Cotswolds",
-    mood: "Proper, eerie, romantic",
-  },
-  {
-    category: "historical",
-    premise: "A samurai's child in Edo-period Japan carries a letter that could start a war",
-    timeline: "Edo period, 1803, ten days on the Tōkaidō road",
-    framing: "Historical adventure",
-    place: "Post towns and pine forests of feudal Japan",
-    mood: "Disciplined, urgent, poetic",
-  },
-  {
-    category: "historical",
-    premise: "A witch trial survivor in 1600s Salem runs a hidden library of forbidden science",
-    timeline: "Colonial era, 1692, one winter of secrecy",
-    framing: "Historical thriller",
-    place: "Salt-stained cottages and candlelit cellars of Salem",
-    mood: "Fearful, defiant, claustrophobic",
-  },
-  {
-    category: "historical",
-    premise: "A Viking merchant's daughter brokers peace between raiders and monks during a white winter",
-    timeline: "Viking Age, 986 CE, one blizzard-bound month",
-    framing: "Historical saga",
-    place: "A frozen fjord trading hall in Norway",
-    mood: "Harsh, honorable, windswept",
-  },
-  {
-    category: "historical",
-    premise: "A medieval blacksmith's apprentice hides a forbidden clockwork heart from the inquisitors",
-    timeline: "Medieval Europe, 1240s, nine days before the inspection",
-    framing: "Historical fiction with clockpunk elements",
-    place: "A soot-dark forge town in the Rhineland",
-    mood: "Tense, inventive, candlelit",
-  },
-  {
-    category: "historical",
-    premise: "A circus runaway in Victorian London joins a secret society of inventors",
-    timeline: "Victorian era, 1887, one exhibition season",
-    framing: "Steampunk historical adventure",
-    place: "Gaslit London rooftops and hidden workshops",
-    mood: "Whimsical, daring, foggy",
-  },
-  {
-    category: "ancient",
-    premise: "A Bronze Age village child befriends a stray god disguised as a wounded wolf",
-    timeline: "Bronze Age, 1150 BCE, three moonlit nights",
-    framing: "Mythic historical fiction",
-    place: "A river settlement in Anatolia",
-    mood: "Primal, wonder-filled, fierce",
-  },
-  {
-    category: "ancient",
-    premise: "A palace scribe in ancient Mesopotamia must forge a peace treaty between rival kings",
-    timeline: "Ancient Mesopotamia, 1750 BCE, seven days of negotiation",
-    framing: "Epic historical drama",
-    place: "Ziggurat courts under a merciless sun",
-    mood: "Weighty, diplomatic, dusty",
-  },
-  {
-    category: "ancient",
-    premise: "A desert nomad on the Silk Road guides a stranger who never casts a shadow",
-    timeline: "Classical antiquity, 200 BCE, a caravan crossing of forty days",
-    framing: "Legendary road epic",
-    place: "Salt flats and oasis caravanserais of Central Asia",
-    mood: "Mythic, patient, sun-beaten",
-  },
-];
-
-/** Fully distinct story concepts — legacy list kept for reference; blueprints are authoritative. */
-const STORY_PREMISES = STORY_BLUEPRINTS.map((b) => b.premise);
-
 const TRAIT_THEMES: Record<string, string> = {
   extraversion: "social energy, speaking up, crowds vs solitude, leading vs listening",
   agreeableness: "empathy, conflict, trust, forgiveness, helping strangers",
@@ -408,45 +103,6 @@ const CHAPTER_TITLES = [
   "Threshold",
 ];
 
-function pick<T>(arr: T[], seed: number): T {
-  return arr[Math.abs(seed) % arr.length]!;
-}
-
-function hashString(input: string): number {
-  return input.split("").reduce((acc, char, index) => acc + char.charCodeAt(0) * (index + 1), 0);
-}
-
-function creativeBriefForSeed(storySeed: string) {
-  const h = hashString(storySeed);
-  const blueprint = pick(STORY_BLUEPRINTS, h + 23);
-  return {
-    settingHint: pick(SETTINGS, h),
-    genreHint: pick(STORY_GENRES, h + 7),
-    toneHint: blueprint.mood || pick(STORY_TONES, h + 13),
-    timelineEra: blueprint.timeline,
-    premise: blueprint.premise,
-    blueprint,
-    runId: storySeed.slice(0, 12),
-  };
-}
-
-function worldContextFromBlueprint(
-  blueprint: StoryBlueprint,
-  hero: string,
-  parsed?: Partial<StoryWorldContext>,
-  settingFallback?: string
-): StoryWorldContext {
-  return {
-    framing: blueprint.framing,
-    timeline: blueprint.timeline,
-    place: parsed?.place?.trim() || blueprint.place,
-    yourRole:
-      parsed?.yourRole?.trim() ||
-      `You are ${hero}, living inside this story. Every choice is yours.`,
-    mood: parsed?.mood?.trim() || blueprint.mood,
-  };
-}
-
 function personalityBeatHints(start: number, end: number) {
   return BFI2_SHORT.slice(start, end).map((q, i) => ({
     beat: start + i + 1,
@@ -454,10 +110,6 @@ function personalityBeatHints(start: number, end: number) {
     trait: q.trait,
     theme: TRAIT_THEMES[q.trait] ?? q.trait,
   }));
-}
-
-function settingForSeed(storySeed: string): string {
-  return creativeBriefForSeed(storySeed).settingHint;
 }
 
 /** Story-flavored answers that still map to standard BFI raw scores (1–5 = agree with statement). */
@@ -695,44 +347,31 @@ export function buildFallbackStory(
 ): StoryJourney {
   const seedKey = storySeed || userId;
   const hero = userName?.split(" ")[0] || "You";
-  const brief = creativeBriefForSeed(seedKey);
-  const setting = brief.premise.split(":")[0]?.slice(0, 80) || settingForSeed(seedKey);
-  const title = brief.premise.split(/[.!]/)[0]?.slice(0, 60) || `Tale of ${hero}`;
+  const world = buildMinimalWorldFallback(hero, seedKey);
 
-  const beats: StoryBeat[] = BFI2_SHORT.map((q, i) =>
-    buildTraitFallbackBeat(i, hero, setting, brief.premise)
+  const beats: StoryBeat[] = BFI2_SHORT.map((_, i) =>
+    buildTraitFallbackBeat(i, hero, world.setting, world.premise)
   );
 
   return {
-    title,
-    prologue: brief.premise,
+    title: world.title,
+    prologue: world.prologue,
     heroName: hero,
-    setting: brief.blueprint.place,
-    worldContext: worldContextFromBlueprint(brief.blueprint, hero, undefined, setting),
+    setting: world.setting,
+    worldContext: world.worldContext,
     beats,
   };
 }
 
-const STORY_BATCH_SYSTEM_PROMPT = `You write ONE continuous story for personality discovery. Return compact JSON only.
+const STORY_BATCH_SYSTEM_PROMPT = `You write story BEATS for an interactive personality journey. Return compact JSON only.
 
-CRITICAL: Every run is a totally different story. Premises can be ANY genre — sci-fi, aliens, medieval, modern wealth, horror, comedy, historical, surreal, whatever fits the brief. NEVER default to a fantasy quest with maps, lanterns, mirror pools, travelers, or mystical journeys.
+The story world (title, era, place, premise) is ALREADY defined — do not change it.
+Your job: write plot beats that fit that world and weave personality themes naturally.
 
-Batch 1: title, prologue (2 sentences max), heroName, setting, worldContext, beats (exactly N items).
-Later batches: beats array only (exactly N items).
-
-worldContext (batch 1 only): {
-  "framing": "Match the STORY BLUEPRINT framing exactly",
-  "timeline": "Copy the EXACT timeline string from the blueprint — do not invent a different era",
-  "place": "Match the blueprint place unless the premise requires a specific sub-location",
-  "yourRole": "Who the player is in THIS premise — 1-2 sentences",
-  "mood": "Match the blueprint mood"
-}
-
-TIMELINE RULE: worldContext.timeline MUST be copied verbatim from the blueprint. Do NOT default to Medieval 1240s. Modern, retro, futuristic, and ancient eras are all valid — use what the blueprint says.
-
-Each beat must advance YOUR invented plot. Weave personality themes naturally — never mention Big Five or psychology.
+Return JSON: {"beats":[...]} with exactly N items unless told otherwise.
 Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence), question (one line), choices (5 label+value), scenePrompt (visual, no text in image).
-Choice values 5,4,3,2,1 once each. Labels under 12 words.`;
+Choice values 5,4,3,2,1 once each. Labels under 12 words. Never mention Big Five or psychology.
+Never use generic fantasy quest tropes (blank maps, mirror pools, lantern journeys).`;
 
 function scenePromptFromBeat(setting: string, chapter: number, narrative: string): string {
   const detail = narrative.slice(0, 100).replace(/["']/g, "");
@@ -801,6 +440,68 @@ function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBea
     }
     throw new Error(`Invalid story JSON (${trimmed.slice(0, 120)}…)`);
   }
+}
+
+async function generateStoryWorld(
+  provider: "gemini" | "openai",
+  hero: string,
+  storySeed: string,
+  llmKeys: LlmKeySource | undefined
+): Promise<StoryWorldDraft> {
+  const prompt = buildWorldGenPrompt(hero, storySeed);
+  let lastError = "world generation failed";
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const temperature = 1 + attempt * 0.05;
+      const retryHint =
+        attempt > 0
+          ? "\n\nYour last concept was too generic or repetitive. Invent something radically different — new era, new genre, new place."
+          : "";
+      const raw =
+        provider === "gemini"
+          ? await geminiGenerateText({
+              system: WORLD_GEN_SYSTEM_PROMPT,
+              prompt: prompt + retryHint,
+              temperature,
+              maxTokens: 4096,
+              json: true,
+              apiKey: llmKeys?.geminiKey ?? undefined,
+              model: llmKeys?.geminiModel ?? undefined,
+            })
+          : await callStoryLlmOpenAi(WORLD_GEN_SYSTEM_PROMPT, prompt + retryHint, llmKeys, temperature);
+
+      const parsed = parseStoryJson(raw) as Record<string, unknown>;
+      if (isValidWorldDraft(parsed, hero)) {
+        return draftFromParsed(parsed, hero);
+      }
+      lastError = "world JSON missing required fields";
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+type StoryBatchMeta = {
+  title: string;
+  prologue: string;
+  heroName: string;
+  setting: string;
+  premise: string;
+  worldContext: StoryWorldContext;
+};
+
+function metaFromWorldDraft(world: StoryWorldDraft, hero: string): StoryBatchMeta {
+  return {
+    title: world.title,
+    prologue: world.prologue,
+    heroName: hero,
+    setting: world.setting,
+    premise: world.premise,
+    worldContext: world.worldContext,
+  };
 }
 
 const FORBIDDEN_STORY_PATTERNS =
@@ -938,16 +639,6 @@ async function fetchStoryBatchChat(
   throw new Error(lastError);
 }
 
-type StoryBatchMeta = {
-  title: string;
-  prologue: string;
-  heroName: string;
-  setting: string;
-  premise: string;
-  blueprint: StoryBlueprint;
-  worldContext: StoryWorldContext;
-};
-
 async function callStoryLlm(
   provider: "gemini" | "openai",
   system: string,
@@ -1028,41 +719,41 @@ function buildBatchPrompt(
   end: number,
   personalityHints: unknown
 ): string {
-  const brief = creativeBriefForSeed(storySeed);
+  const entropy = storyEntropy(storySeed);
+
+  if (!meta) {
+    throw new Error("Story meta missing for batch prompt");
+  }
 
   if (batch === 0) {
-    const bp = brief.blueprint;
-    return `Write a COMPLETELY ORIGINAL story. Run id: ${brief.runId}.
-Category: ${bp.category.toUpperCase()} — honor this era, NOT a default medieval fantasy.
+    return `Run id: ${entropy.runId}
+The story world is ALREADY invented — do not change era, timeline, or premise.
 
-STORY BLUEPRINT (authoritative — copy timeline/framing/place/mood exactly into worldContext):
-- Premise: "${bp.premise}"
-- Timeline (COPY VERBATIM into worldContext.timeline): "${bp.timeline}"
-- Framing: "${bp.framing}"
-- Place: "${bp.place}"
-- Mood: "${bp.mood}"
+Title: ${meta.title}
+Prologue: ${meta.prologue}
+Premise: ${meta.premise}
+Setting: ${meta.setting}
+World context: ${JSON.stringify(meta.worldContext)}
 
-The plot, characters, and scenes must match this blueprint's era (${bp.category}).
-Do NOT set the story in Medieval Europe unless the timeline above says so.
+Write the OPENING ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}) that launch THIS specific story.
+Return JSON ONLY: {"beats":[...]}
 
-Return exactly ${STORY_BATCH_SIZE} beats (ids ${start + 1}-${end}).
-Each beat explores a personality theme through YOUR plot:
+Personality themes to weave into your plot:
 ${JSON.stringify(personalityHints)}`;
   }
 
-  return `Continue the SAME story for "${meta?.heroName || hero}".
-Premise (do not abandon): "${meta?.premise || brief.premise}"
-World bible:
-${JSON.stringify(meta?.worldContext)}
+  return `Continue the SAME story for "${meta.heroName || hero}".
+Premise (do not abandon): "${meta.premise}"
+World bible: ${JSON.stringify(meta.worldContext)}
 
-Title: ${meta?.title || "Untitled"}
-Setting: ${meta?.setting || setting}
+Title: ${meta.title}
+Setting: ${meta.setting}
 Recent plot: ${storySoFar.slice(-600) || "Story just started."}
 
 Return JSON ONLY: {"beats":[...]}
 Exactly ${STORY_BATCH_SIZE} beats, ids ${start + 1}-${end}. Same world, same characters, new plot events.
 
-Personality themes for these beats (weave into YOUR story):
+Personality themes for these beats:
 ${JSON.stringify(personalityHints)}`;
 }
 
@@ -1078,11 +769,17 @@ async function generateStoryInBatches(
   provider: "gemini" | "openai",
   llmKeys: LlmKeySource | undefined,
   storySeed: string
-): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean } | null> {
+): Promise<{ journey: StoryJourney; warnings: string[]; partialFill: boolean; worldDraft: StoryWorldDraft } | null> {
   const hero = userName || "Traveler";
-  const brief = creativeBriefForSeed(storySeed);
-  const settingHint = brief.settingHint;
-  let meta: StoryBatchMeta | null = null;
+  let worldDraft: StoryWorldDraft;
+  try {
+    worldDraft = await generateStoryWorld(provider, hero, storySeed, llmKeys);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`World generation failed: ${msg}`);
+  }
+
+  let meta: StoryBatchMeta = metaFromWorldDraft(worldDraft, hero);
   const allBeats: StoryBeat[] = [];
   let storySoFar = "";
   const warnings: string[] = [];
@@ -1105,7 +802,7 @@ async function generateStoryInBatches(
       hero,
       storySeed,
       meta,
-      meta?.setting || settingHint,
+      meta.setting,
       storySoFar,
       start,
       end,
@@ -1130,33 +827,13 @@ async function generateStoryInBatches(
       partialFill = true;
     }
 
-    if (batch === 0) {
-      if (!parsed.title || !parsed.prologue) {
-        throw new Error(`Batch 1 missing title/prologue (got ${parsed.beats?.length ?? 0} beats)`);
-      }
-      meta = {
-        title: parsed.title,
-        prologue: parsed.prologue,
-        heroName: parsed.heroName || hero,
-        setting: parsed.setting || brief.blueprint.place || settingHint,
-        premise: brief.premise,
-        blueprint: brief.blueprint,
-        worldContext: worldContextFromBlueprint(
-          brief.blueprint,
-          parsed.heroName || hero,
-          parseWorldContext(parsed as Record<string, unknown>, parsed.heroName || hero, parsed.setting || settingHint),
-          parsed.setting || settingHint
-        ),
-      };
-    }
-
     const llmBeats = parsed.beats ?? [];
     const { beats: merged, filled } = mergeBatchBeats(
       start,
       llmBeats,
-      meta?.heroName || hero,
-      meta?.setting || settingHint,
-      meta?.premise || brief.premise
+      meta.heroName || hero,
+      meta.setting,
+      meta.premise
     );
 
     if (filled > 0) {
@@ -1178,7 +855,7 @@ async function generateStoryInBatches(
       .join(" ");
   }
 
-  if (!meta || allBeats.length !== 30) {
+  if (allBeats.length !== 30) {
     throw new Error(`Expected 30 beats, got ${allBeats.length}`);
   }
 
@@ -1193,6 +870,7 @@ async function generateStoryInBatches(
     }),
     warnings,
     partialFill,
+    worldDraft,
   };
 }
 
@@ -1251,22 +929,23 @@ export async function generateStoryJourney(
   options?: StoryGenerationOptions
 ): Promise<StoryJourney> {
   const storySeed = options?.storySeed || createStorySeed();
-  const brief = creativeBriefForSeed(storySeed);
   const providerChain = resolveLlmProviderChain(llmKeys);
   const providerResolved = providerChain[0] ?? null;
 
-  const fallback = (reason: string): StoryJourney => ({
-    ...buildFallbackStory(userId, userName, storySeed),
-    _debug: {
-      storySource: "fallback",
-      storyModel: "built-in-arc",
-      providerResolved,
-      storyFailureReason: reason,
-      storySeed,
-      storyPremise: brief.premise,
-      storyBlueprintCategory: brief.blueprint.category,
-    },
-  });
+  const fallback = (reason: string): StoryJourney => {
+    const fb = buildFallbackStory(userId, userName, storySeed);
+    return {
+      ...fb,
+      _debug: {
+        storySource: "fallback",
+        storyModel: "built-in-arc",
+        providerResolved,
+        storyFailureReason: reason,
+        storySeed,
+        storyPremise: fb.worldContext.timeline,
+      },
+    };
+  };
 
   if (!providerChain.length) {
     return fallback("No LLM API key configured (add a key in Admin → Platform AI Keys)");
@@ -1288,8 +967,7 @@ export async function generateStoryJourney(
             storyPartialFill: result.partialFill,
             storyWarnings: result.warnings.length ? result.warnings : undefined,
             storySeed,
-            storyPremise: brief.premise,
-            storyBlueprintCategory: brief.blueprint.category,
+            storyPremise: result.worldDraft.premise,
           },
         };
       }
