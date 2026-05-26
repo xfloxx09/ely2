@@ -2,6 +2,9 @@ import type { BFIQuestion } from "./bfi2.js";
 import { BFI2_SHORT } from "./bfi2.js";
 import { geminiGenerateText, geminiChatCompletion, resolveLlmProviderChain, type LlmKeySource, type GeminiMessage } from "./gemini.js";
 import {
+  parseStoryResponse,
+} from "./story-json-parse.js";
+import {
   WORLD_GEN_SYSTEM_PROMPT,
   buildWorldGenPrompt,
   buildMinimalWorldFallback,
@@ -366,12 +369,11 @@ export function buildFallbackStory(
 const STORY_BATCH_SYSTEM_PROMPT = `You write story BEATS for an interactive personality journey. Return compact JSON only.
 
 The story world (title, era, place, premise) is ALREADY defined — do not change it.
-Your job: write plot beats that fit that world and weave personality themes naturally.
+Return ONLY a single JSON object: {"beats":[...]} — no markdown, no commentary after the JSON.
 
-Return JSON: {"beats":[...]} with exactly N items unless told otherwise.
-Each beat: id, bfiId, trait, chapter, chapterTitle, narrative (ONE sentence), question (one line), choices (5 label+value), scenePrompt (visual, no text in image).
-Choice values 5,4,3,2,1 once each. Labels under 12 words. Never mention Big Five or psychology.
-Never use generic fantasy quest tropes (blank maps, mirror pools, lantern journeys).`;
+Keep each beat compact: narrative one short sentence, scenePrompt under 12 words, choice labels under 10 words.
+Each beat: id, bfiId, trait, chapter, chapterTitle, narrative, question, choices (5 label+value), scenePrompt.
+Choice values 5,4,3,2,1 once each. Never mention Big Five or psychology.`;
 
 function scenePromptFromBeat(setting: string, chapter: number, narrative: string): string {
   const detail = narrative.slice(0, 100).replace(/["']/g, "");
@@ -405,41 +407,9 @@ const STORY_BATCH_COUNT = 6;
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
-function extractBeatsFromJson(parsed: Record<string, unknown>): StoryBeat[] {
-  const direct = [parsed.beats, parsed.storyBeats, parsed.items];
-  for (const candidate of direct) {
-    if (Array.isArray(candidate) && candidate.length) {
-      return candidate as StoryBeat[];
-    }
-  }
-  for (const val of Object.values(parsed)) {
-    if (
-      Array.isArray(val) &&
-      val.length &&
-      typeof val[0] === "object" &&
-      val[0] !== null &&
-      ("bfiId" in (val[0] as object) || "narrative" in (val[0] as object))
-    ) {
-      return val as StoryBeat[];
-    }
-  }
-  return [];
-}
-
-function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBeat[] } {
-  const trimmed = raw.trim();
-  if (!trimmed) return { beats: [] };
-  try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    return { ...(parsed as Partial<StoryJourney>), beats: extractBeatsFromJson(parsed) };
-  } catch {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
-      return { ...(parsed as Partial<StoryJourney>), beats: extractBeatsFromJson(parsed) };
-    }
-    throw new Error(`Invalid story JSON (${trimmed.slice(0, 120)}…)`);
-  }
+function parseStoryJson(raw: string): Partial<StoryJourney> & { beats?: StoryBeat[]; jsonRecovered?: boolean } {
+  const { beats, recovered } = parseStoryResponse(raw);
+  return { beats: beats as StoryBeat[], jsonRecovered: recovered };
 }
 
 async function generateStoryWorld(
@@ -809,16 +779,30 @@ async function generateStoryInBatches(
       personalityHints
     );
 
-    let parsed: Partial<StoryJourney> & { beats?: StoryBeat[] };
+    let parsed: Partial<StoryJourney> & { beats?: StoryBeat[]; jsonRecovered?: boolean };
     let raw = "";
     try {
       raw =
         batch === 0
           ? await fetchStoryBatchSingle(provider, systemPrompt, prompt, llmKeys, batch)
-          : await fetchStoryBatchChat(provider, systemPrompt, chatHistory, prompt, llmKeys, batch);
+          : await fetchStoryBatchChat(
+              provider,
+              systemPrompt,
+              chatHistory.slice(-4),
+              prompt,
+              llmKeys,
+              batch
+            );
       parsed = parseStoryJson(raw);
+      if (parsed.jsonRecovered) {
+        warnings.push(`Batch ${batch + 1} JSON was malformed; recovered ${parsed.beats?.length ?? 0} beats from partial response`);
+        partialFill = true;
+      }
       chatHistory.push({ role: "user", content: prompt });
-      chatHistory.push({ role: "assistant", content: raw.slice(0, 12000) });
+      chatHistory.push({
+        role: "assistant",
+        content: JSON.stringify({ beats: (parsed.beats ?? []).slice(0, STORY_BATCH_SIZE) }),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (batch === 0) throw new Error(`Batch 1 failed: ${msg}`);
